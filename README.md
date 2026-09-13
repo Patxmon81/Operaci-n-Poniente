@@ -1,47 +1,35 @@
 # Operación Poniente
 
-Juego de estrategia en tiempo real 2D con vista cenital, en HTML5 + CSS +
-JavaScript *vanilla*. Sin frameworks, sin dependencias y sin herramientas de
-compilación: basta con abrir `index.html` en el navegador.
+Juego de estrategia en tiempo real **isométrico**, en HTML5 + CSS + JavaScript
+*vanilla*. Sin frameworks, sin dependencias, sin herramientas de compilación y
+**sin un solo archivo de imagen**: todo el arte se dibuja por código al arrancar.
 
 > **España, 2026.** El jugador dirige el **Mando de Emergencia Territorial**
 > frente al **Consorcio Poniente**, una organización paramilitar transnacional
-> ficticia con bases en la costa norte de África y células infiltradas en varias
-> ciudades españolas.
->
-> Ambientación de ficción. Los enclaves del Consorcio (Puerto Tazlán, Bahía
-> Ámbar, Fuerte Zaidar) son topónimos inventados y no corresponden a ninguna
-> localidad real.
+> ficticia. El escenario actual es la **Vega del Jarama**, al noreste de Madrid:
+> un río que parte el sector en dos, una base del MET en la margen oriental y un
+> puesto avanzado del Consorcio en la occidental, unidos por un único vado.
+
+Se abre `index.html` en el navegador. Funciona sobre `file://`, sin servidor.
 
 ---
 
-## Estado: Fase 1 — Motor base
+## Estado
 
-Esta entrega cubre **únicamente** los cimientos del motor:
+| Fase | Contenido | Estado |
+|---|---|---|
+| 1 | Mapa estratégico de la Península Ibérica, cámara, unidades y pathfinding | aparcada en `campaign/` |
+| **2** | **Motor isométrico: terreno, vegetación, edificios y unidades animadas** | **actual** |
+| 3 | Aldeanos, recursos y construcción | pendiente |
+| 4 | Combate, IA y niebla de guerra | pendiente |
 
-| | |
-|---|---|
-| **1. Mapa base** | Silueta estilizada de la Península Ibérica, el Estrecho de Gibraltar, el archipiélago balear y la costa norteafricana, con nodos de ciudad marcados y rotulados. |
-| **2. Cámara** | Desplazamiento por arrastre y zoom con la rueda, anclado al punto bajo el cursor. |
-| **3. Unidades** | Tres unidades de ejemplo: selección por clic y por caja de arrastre, movimiento con clic derecho y *pathfinding* que evita el mar. |
-| **4. Estructura** | `index.html`, `style.css`, `js/map.js`, `js/units.js`, `js/main.js`. |
+La Fase 1 construyó un mapa de operaciones de toda España; al ver que lo buscado
+era un RTS táctico al estilo Age of Empires, el proyecto pivotó a isométrico. El
+mapa peninsular queda en `campaign/map.js`, sin cargar, para volver como pantalla
+de campaña cuando haya varios escenarios que enlazar.
 
-**Fuera de alcance por ahora** (fases posteriores): recursos, construcción,
-inteligencia artificial y niebla de guerra.
-
----
-
-## Cómo ejecutarlo
-
-Abrir `index.html` directamente en el navegador. Todos los scripts son clásicos
-(sin módulos ES), así que funciona también sobre `file://`, sin servidor.
-
-Si se prefiere servirlo:
-
-```sh
-python3 -m http.server 8080
-# → http://localhost:8080
-```
+**Fuera de alcance por ahora:** recursos, construcción, combate, IA y niebla de
+guerra.
 
 ---
 
@@ -50,102 +38,102 @@ python3 -m http.server 8080
 | Entrada | Acción |
 |---|---|
 | Clic izquierdo | Seleccionar unidad |
-| Arrastrar con el izquierdo | Caja de selección |
-| Mayús + clic / arrastre | Añadir a la selección |
-| **Clic derecho** | Ordenar movimiento |
-| **Botón central + arrastrar** | Desplazar el mapa |
-| **Espacio (o Ctrl) + arrastrar izquierdo** | Desplazar el mapa |
-| **Rueda del ratón** | Zoom sobre el cursor |
-| `W` `A` `S` `D` / flechas | Desplazar el mapa |
+| Arrastrar con el izquierdo | Encuadre de selección |
+| Mayús + clic | Añadir a la selección |
+| **Clic derecho** | Ordenar marcha |
+| **Botón central + arrastrar** | Mover la cámara |
+| **Espacio (o Ctrl) + arrastrar** | Mover la cámara |
+| **Rueda** | Zoom sobre el cursor |
+| Clic en el minimapa | Saltar a ese punto del sector |
+| `W` `A` `S` `D` / flechas | Mover la cámara |
 | `Q` / `E` | Alejar / acercar |
+| `1` `2` `3` | Seleccionar todos los fusileros / exploradores / zapadores |
 | `X` | Alto |
 | `Esc` | Anular la selección |
 | `Ctrl` + `A` | Seleccionar todas las unidades |
-| `1` `2` `3` | Seleccionar una unidad concreta |
-| `G` | Mostrar la malla de navegación |
-| `F` | Centrar la cámara en el CG de Madrid |
+| `F` | Centrar en la base |
 | `H` | Ocultar la interfaz |
 
-En pantallas táctiles: un dedo desplaza el mapa, dos dedos hacen zoom.
-
-> El botón izquierdo queda reservado a la selección, como es habitual en el
-> género, así que el arrastre de cámara se hace con el botón central o con
-> Espacio pulsado.
+En pantallas táctiles: un dedo mueve la cámara, dos dedos hacen zoom.
 
 ---
 
 ## Arquitectura
 
-Tres scripts clásicos que cuelgan de un único espacio de nombres global, `OP`,
-cargados en orden por `index.html`.
+Cinco scripts clásicos que cuelgan del espacio de nombres global `OP`, cargados
+en orden por `index.html`.
 
-### `js/map.js` → `OP.Map`
+### `js/iso.js` → `OP.Iso`
 
-- **Proyección.** Equirectangular simple calibrada para que 1 unidad de mundo
-  ≈ 0,93 km a la latitud media del teatro (90 u/grado de longitud, 120 u/grado
-  de latitud). La geografía se declara en `[lon, lat]` legibles y se proyecta una
-  sola vez al cargar.
-- **Masas de tierra.** Polígonos estilizados (Iberia, Francia, norte de África,
-  Mallorca, Menorca, Ibiza) con su *bounding box* precalculada. `landmassAt()`
-  resuelve el terreno por lanzamiento de rayo, descartando antes por AABB.
-  Francia se marca `navigable: false`: es tierra, pero fuera del área de
-  operaciones.
-- **Malla de navegación.** Rejilla regular de 8 unidades (190 × 210 celdas). Una
-  celda es transitable si su centro cae en terreno navegable **y** ninguna de sus
-  ocho vecinas está bloqueada. Ese margen de una celda mantiene a las unidades
-  separadas de la línea de costa.
-- **Pathfinding.** A\* con heurística octil, montículo binario sobre arrays
-  tipados y marcas de generación (`stamp`) para no limpiar los arrays entre
-  búsquedas. Prohíbe cortar esquinas en diagonal. La ruta se suaviza después por
-  *string pulling*: se elimina todo punto intermedio con visión directa
-  transitable. Un destino sobre el mar se reubica en la costa transitable más
-  cercana, hasta un máximo de 14 celdas (~130 km); más allá, la orden se rechaza.
-- **Dibujado.** Mar con degradado, halo batimétrico, relleno y línea de costa,
-  fronteras a trazos, retícula geográfica, corredores logísticos, nodos de ciudad
-  y rótulos. Los glifos van en espacio mundo; los textos, en espacio pantalla, a
-  tamaño constante.
+Proyección dimétrica 2:1 (rombos de 64×32) y cámara. Convierte entre rejilla,
+píxeles de mundo y pantalla; el zoom mantiene fijo el punto bajo el cursor y el
+encuadre queda acotado al sector.
+
+### `js/art.js` → `OP.Art`
+
+La fábrica de sprites. No hay archivos de imagen: al arrancar se dibujan y se
+cachean en mapas de bits fuera de pantalla (~125 ms).
+
+- **Terreno.** Seis tipos con paleta de meseta castellana en verano (pasto,
+  rastrojo, tierra, arena, agua, monte bajo), cuatro variantes de cada uno, con
+  manchas, grano y briznas.
+- **Transiciones.** Cada tipo tiene cuatro *flecos* direccionales que se pintan
+  sobre el tile vecino de menor prioridad, más un juego de **orillas** con bajío
+  y espuma para el borde del agua. Sin eso, la costa es un escalón de rombos y se
+  ve la rejilla.
+- **Capa de nubes.** Una textura de manchas suaves que se repite sin costura,
+  aplicada al terreno en coordenadas de mundo con `source-atop`. Es lo que rompe
+  de verdad la cuadrícula: introduce variación de luz a una escala mucho mayor
+  que el tile.
+- **Vegetación y enseres.** Pinos, olivos, matorral, roca caliza, cajas, bidones
+  y parapetos de sacos terreros.
+- **Edificios.** Cajas isométricas levantadas sobre una huella de w×h tiles: se
+  dibujan las dos caras que concurren en la esquina frontal, con cubierta plana o
+  a dos aguas, puerta, ventanas, mástil y franja del color de facción.
+- **Unidades.** Un esqueleto sencillo en coordenadas de modelo se posa, se gira
+  sobre el eje vertical y se proyecta; las extremidades son cápsulas con contorno
+  **ordenadas por profundidad**, de modo que el brazo y la pierna del fondo
+  quedan detrás. De ahí salen atlas de 8 direcciones × 9 fotogramas por tipo y
+  facción.
+
+### `js/world.js` → `OP.World`
+
+Escenario de 80×80 tiles, generado con ruido de valor: cauce serpenteante,
+humedad que reparte pasto y rastrojo, caminos de tierra, explanadas de base,
+pinares, un olivar en hileras y el vado. El terreno se hornea por **sectores de
+16×16 tiles** y en cada fotograma sólo se vuelcan los visibles. Incluye el
+pathfinding A\* con heurística octil sobre arrays tipados y suavizado por
+*string pulling*, y el minimapa.
 
 ### `js/units.js` → `OP.Units`
 
-- `Unit`: posición, radio y velocidad en unidades de mundo; rumbo con giro
-  progresivo; ruta como lista de waypoints pendientes.
-- `UnitManager`: selección (por clic, por rectángulo, aditiva), órdenes de
-  movimiento, simulación y dibujado.
-- Las órdenes de grupo reparten **huecos de formación** en anillos concéntricos
-  alrededor del destino y asignan a cada unidad el más cercano, priorizando a las
-  que ya están más cerca; así un grupo no se apila en un punto.
-- `resolveOverlaps()` separa los cuerpos que se solapan, pero **descarta** todo
-  empuje que llevaría a una unidad al agua: la malla sigue siendo la autoridad.
-- Los símbolos son de tipo OTAN y se dibujan a tamaño constante en pantalla
-  (lectura de mapa operativo); se encogen algo al alejar la cámara y pierden el
-  distintivo en vista de teatro.
+Estado, selección (clic, encuadre, aditiva), órdenes con huecos de formación en
+anillos y separación de cuerpos que nunca empuja a una unidad a un tile
+bloqueado. La fase del ciclo de marcha avanza **con la distancia recorrida, no
+con el reloj**, así que los pies no patinan.
 
 ### `js/main.js` → `OP.Game`
 
-- `Camera`: centro en unidades de mundo más factor de zoom. Convierte entre
-  pantalla y mundo, aplica la transformación al contexto (incluido el
-  `devicePixelRatio`), acota el encuadre al mundo y hace zoom manteniendo fijo el
-  punto bajo el cursor. El zoom mínimo se recalcula en cada redimensionado para
-  que nunca se pueda alejar más allá del teatro completo.
-- Entrada de ratón, teclado y táctil; bucle con `requestAnimationFrame` y `dt`
-  acotado a 50 ms.
-- HUD en DOM (no en el lienzo), con `pointer-events: none` para que el lienzo
-  reciba toda la entrada. El panel de selección se redibuja sólo cuando cambia su
-  firma de contenido.
-
-`OP.Game` queda expuesto en la consola (`camera`, `units`, `notify`,
-`toggleNavGrid`) para depurar.
+Cámara, entrada de ratón/teclado/táctil, bucle, HUD y minimapa. El dibujado va
+por capas: terreno → brillos del agua → casilla bajo el cursor → rutas → **todas
+las entidades ordenadas por profundidad** (algoritmo del pintor) → encuadre de
+selección.
 
 ---
 
 ## Notas de diseño
 
-- **Ceuta, Melilla y Baleares no son alcanzables por tierra**, y así debe ser: el
-  pathfinding es terrestre y el Estrecho es agua. Ordenar un movimiento hasta
-  allí devuelve «sin ruta terrestre». El transporte naval y aéreo corresponde a
-  fases posteriores.
-- El coste de un `findPath` sobre este mapa se mide en 1–6 ms, así que la fase
-  siguiente puede recalcular rutas sin presupuesto especial.
-- Toda la geografía vive en `LANDMASSES`, `CITIES`, `BORDERS` y `ROUTES` dentro
-  de `map.js`: añadir un nodo o retocar una costa es editar coordenadas
-  `[lon, lat]`, sin tocar el motor.
+- **El arte es procedimental por necesidad y por criterio.** Age of Empires II
+  consigue su aspecto con decenas de gigabytes de sprites prerrenderizados desde
+  modelos 3D. Sin assets, el objetivo no es imitar ese arte sino su
+  *presentación*: perspectiva isométrica, simbología legible a tamaño pequeño y
+  un paisaje con carácter propio.
+- **La ambientación manda sobre la referencia.** Es España en 2026, así que los
+  soldados llevan equipo moderno y las construcciones son de base militar. Lo que
+  se toma prestado de AoE es la cámara y el lenguaje visual, no la Edad Media.
+- **El terreno es llano.** Los desniveles obligan a dibujar cada tile como un
+  cuadrilátero con cuatro alturas de esquina más los taludes; es un salto grande
+  de complejidad y queda para una fase posterior.
+- **El vado es el único paso del río.** Ordenar marcha a la otra orilla por
+  cualquier otro punto devuelve «sin ruta terrestre», y es lo correcto: da una
+  posición que defender cuando exista el combate.
