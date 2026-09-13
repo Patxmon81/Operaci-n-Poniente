@@ -27,25 +27,31 @@
         <h1>Operación Poniente</h1>
         <p>Vega del Jarama &middot; Sector 7 &middot; España, 2026</p>
       </div>
+      <div id="resources" class="panel"></div>
       <div class="phase">
-        <span class="tag">Fase 2</span>
-        <span class="sub">Motor isométrico</span>
+        <span class="tag">Fase 3</span>
+        <span class="sub">Economía</span>
       </div>
     </header>
 
     <section id="readouts" class="panel">
       <div class="row"><span class="k">Casilla</span><span class="v" id="readout-cursor">&mdash;</span></div>
-      <div class="row"><span class="k">Terreno</span><span class="v" id="readout-terrain">&mdash;</span></div>
+      <div class="row"><span class="k">Bajo el cursor</span><span class="v" id="readout-terrain">&mdash;</span></div>
       <div class="row"><span class="k">Zoom</span><span class="v" id="readout-zoom">&mdash;</span></div>
       <div class="row"><span class="k">Sector</span><span class="v" id="readout-world">&mdash;</span></div>
       <div class="row"><span class="k">Render</span><span class="v" id="readout-fps">&mdash;</span></div>
     </section>
 
     <section id="panel-selection" class="panel">
-      <h2>Fuerzas propias <span id="selection-count">0 / 0</span></h2>
+      <h2><span id="selection-title">Fuerzas propias</span> <span id="selection-count">0 / 0</span></h2>
       <ul id="selection-list">
         <li class="empty">Sin unidades seleccionadas</li>
       </ul>
+    </section>
+
+    <section id="panel-build" class="panel">
+      <h2>Construcción <span id="build-hint"></span></h2>
+      <div id="build-list"></div>
     </section>
 
     <aside id="panel-side">
@@ -57,19 +63,16 @@
       <section id="panel-controls" class="panel">
         <h2>Controles</h2>
         <dl class="controls">
-          <dt>Clic izq.</dt><dd>Seleccionar</dd>
+          <dt>Clic izq.</dt><dd>Seleccionar unidad o edificio</dd>
           <dt>Arrastrar izq.</dt><dd>Encuadre de selección</dd>
-          <dt>Mayús + clic</dt><dd>Añadir a la selección</dd>
-          <dt>Clic der.</dt><dd>Ordenar marcha</dd>
+          <dt>Clic der.</dt><dd>Marchar, recolectar o construir</dd>
           <dt>Botón central</dt><dd>Mover cámara</dd>
-          <dt>Espacio + arrastrar</dt><dd>Mover cámara</dd>
           <dt>Rueda</dt><dd>Zoom sobre el cursor</dd>
           <dt>W A S D</dt><dd>Mover cámara</dd>
-          <dt>Q / E</dt><dd>Alejar / acercar</dd>
-          <dt>1 &middot; 2 &middot; 3</dt><dd>Seleccionar por tipo</dd>
+          <dt>.</dt><dd>Zapadores sin tajo</dd>
+          <dt>1 &middot; 2 &middot; 3</dt><dd>Seleccionar por tipo / adiestrar</dd>
           <dt>X</dt><dd>Alto</dd>
-          <dt>Esc</dt><dd>Anular selección</dd>
-          <dt>Ctrl + A</dt><dd>Seleccionar todo</dd>
+          <dt>Esc</dt><dd>Cancelar o anular selección</dd>
           <dt>F</dt><dd>Centrar en la base</dd>
           <dt>H</dt><dd>Ocultar interfaz</dd>
         </dl>
@@ -86,6 +89,7 @@
 
   <script src="js/iso.js"></script>
   <script src="js/art.js"></script>
+  <script src="js/economy.js"></script>
   <script src="js/world.js"></script>
   <script src="js/units.js"></script>
   <script src="js/main.js"></script>

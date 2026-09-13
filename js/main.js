@@ -1,6 +1,6 @@
 /* =============================================================================
  * OPERACIÓN PONIENTE — Motor isométrico
- * js/main.js — Arranque, entrada, bucle de simulación, HUD y minimapa.
+ * js/main.js — Arranque, entrada, bucle, HUD, construcción y producción.
  * ========================================================================== */
 
 var OP = window.OP || (window.OP = {});
@@ -12,6 +12,7 @@ var OP = window.OP || (window.OP = {});
   var Art = OP.Art;
   var World = OP.World;
   var Units = OP.Units;
+  var Eco = OP.Economy;
 
   var canvas, ctx, mini, miniCtx;
   var camera, units;
@@ -25,11 +26,14 @@ var OP = window.OP || (window.OP = {});
     panLast: { x: 0, y: 0 },
     box: null,
     spaceHeld: false,
+    shiftHeld: false,
     keys: Object.create(null),
     miniDrag: false,
     touch: { mode: null, a: null, dist: 0 }
   };
 
+  var placing = null;          // definición de edificio pendiente de colocar
+  var selectedBuilding = null; // edificio propio seleccionado
   var markers = [];
   var showHud = true;
   var time = 0;
@@ -52,10 +56,13 @@ var OP = window.OP || (window.OP = {});
     hud.zoom = document.getElementById('readout-zoom');
     hud.fps = document.getElementById('readout-fps');
     hud.selection = document.getElementById('selection-list');
+    hud.selectionTitle = document.getElementById('selection-title');
     hud.selectionCount = document.getElementById('selection-count');
     hud.toast = document.getElementById('toast');
+    hud.buildList = document.getElementById('build-list');
+    hud.buildHint = document.getElementById('build-hint');
+    hud.resources = {};
 
-    // Deja que el navegador pinte el aviso de carga antes de hornear el arte.
     requestAnimationFrame(function () { setTimeout(boot, 0); });
   }
 
@@ -67,55 +74,56 @@ var OP = window.OP || (window.OP = {});
     var tWorld = performance.now() - t0 - tArt;
 
     var m = World.minimap();
-    mini.width = m.canvas.width;
-    mini.height = m.canvas.height;
-    mini.style.aspectRatio = m.canvas.width + ' / ' + m.canvas.height;
+    mini.width = m.width;
+    mini.height = m.height;
+    mini.style.aspectRatio = m.width + ' / ' + m.height;
 
     camera = new Iso.Camera(World.bounds);
     resize();
-    camera.zoom = 1.05;
-    camera.centerOnGrid(55, 25);
+    camera.zoom = 1.0;
+    camera.centerOnGrid(World.baseMet.gx, World.baseMet.gy + 4);
 
     units = Units.createManager();
     spawnForces();
+    buildResourceBar();
+    buildBuildPanel();
     bindEvents();
 
     var s = World.stats();
     document.getElementById('readout-world').textContent =
-      World.W + '×' + World.H + ' · ' + s.entidades + ' elementos';
+      World.W + '×' + World.H + ' · ' + s.nodos + ' nodos';
 
     hud.loading.classList.add('done');
-    notify('Sector Vega del Jarama. Arrastra con el botón central para mover la cámara.', 'info', 5000);
-    refreshSelection();
+    notify('Cuatro zapadores esperan órdenes. Clic derecho sobre un árbol, un frutal o un montón de chatarra para ponerlos a trabajar.', 'info', 7000);
 
     console.log('[Operación Poniente] arte ' + tArt.toFixed(0) + ' ms, escenario ' + tWorld.toFixed(0) + ' ms');
     requestAnimationFrame(frame);
   }
 
   function spawnForces() {
+    var base = World.baseMet;
     var roster = [
-      { type: 'fusilero',   callsign: 'LOBO-1',     gx: 51, gy: 27 },
-      { type: 'fusilero',   callsign: 'LOBO-2',     gx: 52, gy: 28 },
-      { type: 'fusilero',   callsign: 'LOBO-3',     gx: 53, gy: 27 },
-      { type: 'explorador', callsign: 'GALGO-1',    gx: 55, gy: 28 },
-      { type: 'explorador', callsign: 'GALGO-2',    gx: 56, gy: 27 },
-      { type: 'zapador',    callsign: 'CASTILLO-1', gx: 54, gy: 29 }
+      { type: 'zapador', gx: base.gx - 4, gy: base.gy + 3 },
+      { type: 'zapador', gx: base.gx - 3, gy: base.gy + 4 },
+      { type: 'zapador', gx: base.gx - 2, gy: base.gy + 4 },
+      { type: 'zapador', gx: base.gx - 1, gy: base.gy + 3 },
+      { type: 'fusilero', gx: base.gx + 2, gy: base.gy + 4 },
+      { type: 'fusilero', gx: base.gx + 3, gy: base.gy + 3 },
+      { type: 'explorador', gx: base.gx + 4, gy: base.gy + 4 }
     ];
     roster.forEach(function (entry) {
-      var spot = World.nearestFree(entry.gx, entry.gy, 10) || { gx: entry.gx, gy: entry.gy };
+      var spot = World.nearestFree(entry.gx, entry.gy, 10) || entry;
       units.add({
-        type: entry.type, callsign: entry.callsign, faction: 'met',
+        type: entry.type, faction: 'met',
         gx: spot.gx + 0.5, gy: spot.gy + 0.5, dir: 1
       });
     });
 
-    // Centinelas del Consorcio: decorado, sin IA en esta fase.
-    [[21, 60, 5], [19, 61, 6], [23, 59, 4]].forEach(function (p, i) {
-      var spot = World.nearestFree(p[0], p[1], 8);
+    [[base.gx - 62, base.gy + 58, 5], [base.gx - 64, base.gy + 60, 6]].forEach(function (p, i) {
+      var spot = World.nearestFree(p[0], p[1], 10);
       if (!spot) return;
       units.add({
-        type: i === 2 ? 'explorador' : 'fusilero',
-        callsign: 'PON-' + (i + 1), faction: 'pon', playable: false,
+        type: i ? 'explorador' : 'fusilero', faction: 'pon', playable: false,
         gx: spot.gx + 0.5, gy: spot.gy + 0.5, dir: p[2]
       });
     });
@@ -131,30 +139,133 @@ var OP = window.OP || (window.OP = {});
   }
 
   /* ---------------------------------------------------------------------------
-   * 2. ENTRADA
+   * 2. MARCADOR DE RECURSOS Y PANEL DE CONSTRUCCIÓN
+   * ------------------------------------------------------------------------ */
+
+  function buildResourceBar() {
+    var bar = document.getElementById('resources');
+    bar.innerHTML = '';
+    Eco.KINDS.concat(['poblacion']).forEach(function (kind) {
+      var item = document.createElement('div');
+      item.className = 'res';
+      var icon = document.createElement('i');
+      icon.style.backgroundImage = 'url(' + Art.icons[kind] + ')';
+      var value = document.createElement('span');
+      value.className = 'val';
+      value.textContent = '0';
+      item.appendChild(icon);
+      item.appendChild(value);
+      item.title = kind === 'poblacion' ? 'Personal en servicio / alojamiento' : Eco.LABEL[kind];
+      bar.appendChild(item);
+      hud.resources[kind] = { item: item, value: value };
+    });
+  }
+
+  function buildBuildPanel() {
+    hud.buildList.innerHTML = '';
+    hud.buildButtons = {};
+    Eco.BUILD_ORDER.forEach(function (id) {
+      var def = Eco.BUILDINGS[id];
+      var btn = document.createElement('button');
+      btn.className = 'build-btn';
+      btn.type = 'button';
+      btn.innerHTML =
+        '<span class="bk">' + def.hotkeyLabel + '</span>' +
+        '<span class="bn">' + def.name + '</span>' +
+        '<span class="bc">' + Eco.formatCost(def.cost) + '</span>';
+      btn.addEventListener('click', function () { startPlacing(def); });
+      btn.addEventListener('mouseenter', function () { hud.buildHint.textContent = def.blurb; });
+      btn.addEventListener('mouseleave', function () { hud.buildHint.textContent = ''; });
+      hud.buildList.appendChild(btn);
+      hud.buildButtons[id] = btn;
+    });
+  }
+
+  var affordSignature = null;
+
+  function refreshBuildPanel() {
+    var sig = Eco.BUILD_ORDER.map(function (id) {
+      return Eco.canAfford(Eco.BUILDINGS[id].cost) ? '1' : '0';
+    }).join('') + (placing ? placing.id : '');
+    if (sig === affordSignature) return;
+    affordSignature = sig;
+
+    Eco.BUILD_ORDER.forEach(function (id) {
+      var btn = hud.buildButtons[id];
+      btn.classList.toggle('poor', !Eco.canAfford(Eco.BUILDINGS[id].cost));
+      btn.classList.toggle('active', !!placing && placing.id === id);
+    });
+  }
+
+  function startPlacing(def) {
+    if (!Eco.canAfford(def.cost)) {
+      notify('Faltan recursos: ' + Eco.missing(def.cost).join(' y ') + '.', 'warn');
+      return;
+    }
+    placing = def;
+    selectedBuilding = null;
+    hud.buildHint.textContent = 'Clic izquierdo para asentar ' + def.name.toLowerCase() +
+      '. Esc o clic derecho para cancelar.';
+  }
+
+  function cancelPlacing() {
+    if (!placing) return false;
+    placing = null;
+    hud.buildHint.textContent = '';
+    return true;
+  }
+
+  function tryPlace(gx, gy) {
+    var def = placing;
+    if (!def) return;
+    var tx = Math.floor(gx), ty = Math.floor(gy);
+    if (!World.canPlace(def, tx, ty)) {
+      notify('Ahí no cabe: el terreno está ocupado o es agua.', 'warn');
+      return;
+    }
+    if (!Eco.canAfford(def.cost)) {
+      notify('Faltan recursos: ' + Eco.missing(def.cost).join(' y ') + '.', 'warn');
+      cancelPlacing();
+      return;
+    }
+    Eco.spend(def.cost);
+    var site = World.addSite(def.id, 'met', tx, ty);
+    if (!site) { Eco.refund(def.cost); return; }
+
+    // Los zapadores seleccionados van a la obra; si no hay, avisa.
+    var workers = units.selectedWorkers();
+    if (workers.length) {
+      workers.forEach(function (u) { u.assignBuild(World, site); });
+      notify(def.name + ': obra abierta, ' + workers.length + ' zapador(es) en camino.', 'info');
+    } else {
+      notify(def.name + ': obra abierta. Selecciona zapadores y haz clic derecho sobre ella.', 'warn', 4200);
+    }
+    addMarker(tx + def.w / 2, ty + def.h / 2, 'good');
+    if (!input.shiftHeld) cancelPlacing();
+  }
+
+  /* ---------------------------------------------------------------------------
+   * 3. ENTRADA
    * ------------------------------------------------------------------------ */
 
   function bindEvents() {
     window.addEventListener('resize', resize);
-
     canvas.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
-
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', function (e) { if (!e.touches.length) input.touch.mode = null; });
-
     mini.addEventListener('mousedown', onMiniDown);
     mini.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
       input.spaceHeld = false;
+      input.shiftHeld = false;
       input.panning = false;
       canvas.classList.remove('grab', 'grabbing');
     });
@@ -174,13 +285,18 @@ var OP = window.OP || (window.OP = {});
       canvas.classList.add('grabbing');
       return;
     }
-    if (event.button === 0) {
-      var w = camera.screenToWorld(p.x, p.y);
-      input.box = {
-        start: w, end: { x: w.x, y: w.y },
-        startScreen: p, moved: false, additive: event.shiftKey
-      };
+    if (event.button !== 0) return;
+
+    var w = camera.screenToWorld(p.x, p.y);
+    if (placing) {
+      var g = Iso.toGrid(w.x, w.y);
+      tryPlace(g.gx, g.gy);
+      return;
     }
+    input.box = {
+      start: w, end: { x: w.x, y: w.y },
+      startScreen: p, moved: false, additive: event.shiftKey
+    };
   }
 
   function onMouseMove(event) {
@@ -190,7 +306,6 @@ var OP = window.OP || (window.OP = {});
     input.grid = Iso.toGrid(input.world.x, input.world.y);
 
     if (input.miniDrag) { miniSeek(local(event, mini)); return; }
-
     if (input.panning) {
       camera.panByScreen(p.x - input.panLast.x, p.y - input.panLast.y);
       input.panLast = p;
@@ -215,21 +330,48 @@ var OP = window.OP || (window.OP = {});
     input.box = null;
 
     if (box.moved) {
+      selectedBuilding = null;
       var n = units.selectInRect(box.start.x, box.start.y, box.end.x, box.end.y, box.additive);
       if (!n && !box.additive) notify('Ninguna unidad dentro del encuadre.', 'info');
     } else {
-      units.selectAt(box.end.x, box.end.y, box.additive);
+      var picked = units.selectAt(box.end.x, box.end.y, box.additive);
+      if (picked) {
+        selectedBuilding = null;
+      } else {
+        // Sin unidad bajo el cursor: prueba a seleccionar un edificio propio.
+        var g = Iso.toGrid(box.end.x, box.end.y);
+        var e = World.entityAt(g.gx, g.gy);
+        selectedBuilding = (e && e.kind === 'building' && e.faction === 'met') ? e : null;
+        if (selectedBuilding) units.clearSelection();
+      }
     }
     refreshSelection();
   }
 
   function onContextMenu(event) {
     event.preventDefault();
+    if (cancelPlacing()) return;
+
     var p = local(event);
     var w = camera.screenToWorld(p.x, p.y);
     var g = Iso.toGrid(w.x, w.y);
-    var result = units.issueMoveOrder(World, g.gx, g.gy);
 
+    // Sobre una entidad explotable o en obra, la orden es de trabajo.
+    var entity = World.entityAt(g.gx, g.gy);
+    if (entity && (entity.resource || entity.site) && units.selectedWorkers().length) {
+      var res = units.issueTargetOrder(World, entity);
+      if (res.count) {
+        addMarker(entity.gx, entity.gy, 'work');
+        notify(res.kind === 'construir'
+          ? res.count + ' zapador(es) a la obra.'
+          : res.count + ' zapador(es) ' + (Units.TYPES.zapador ? '' : '') + 'a por ' + Eco.LABEL[res.resource].toLowerCase() + '.',
+          'info', 2000);
+        refreshSelection();
+        return;
+      }
+    }
+
+    var result = units.issueMoveOrder(World, g.gx, g.gy);
     if (result.reason === 'sin-seleccion') {
       notify('Selecciona primero alguna unidad.', 'warn');
       addMarker(g.gx, g.gy, 'bad');
@@ -237,13 +379,9 @@ var OP = window.OP || (window.OP = {});
     }
     if (result.ordered > 0) {
       addMarker(g.gx, g.gy, result.relocated ? 'adjusted' : 'good');
-      if (result.reason === 'destino-en-agua') {
-        notify('Destino en el río: reasignado a la orilla más próxima.', 'warn');
-      } else if (result.reason === 'destino-ocupado') {
-        notify('Destino ocupado: reasignado al hueco libre más próximo.', 'warn');
-      } else if (result.failed) {
-        notify(result.failed + ' unidad(es) sin ruta hasta el destino.', 'warn');
-      }
+      if (result.reason === 'destino-en-agua') notify('Destino en el río: reasignado a la orilla.', 'warn');
+      else if (result.reason === 'destino-ocupado') notify('Destino ocupado: reasignado al hueco libre más próximo.', 'warn');
+      else if (result.failed) notify(result.failed + ' unidad(es) sin ruta.', 'warn');
     } else {
       addMarker(g.gx, g.gy, 'bad');
       notify('Sin ruta terrestre hasta ese punto.', 'error');
@@ -265,9 +403,8 @@ var OP = window.OP || (window.OP = {});
 
   function miniSeek(p) {
     var m = World.minimap();
-    var scaleX = m.canvas.width / mini.clientWidth;
-    var scaleY = m.canvas.height / mini.clientHeight;
-    var g = World.minimapToGrid(p.x * scaleX, p.y * scaleY);
+    var g = World.minimapToGrid(p.x * (m.width / mini.clientWidth),
+                                p.y * (m.height / mini.clientHeight));
     camera.centerOnGrid(g.gx, g.gy);
   }
 
@@ -302,9 +439,16 @@ var OP = window.OP || (window.OP = {});
     }
   }
 
+  var BUILD_HOTKEY = {};
+  Eco.BUILD_ORDER.forEach(function (id) {
+    var def = Eco.BUILDINGS[id];
+    if (def.hotkey) BUILD_HOTKEY[def.hotkey] = def;
+  });
+
   function onKeyDown(event) {
     var code = event.code;
     input.keys[code] = true;
+    input.shiftHeld = event.shiftKey;
 
     if (code === 'Space') {
       input.spaceHeld = true;
@@ -312,16 +456,31 @@ var OP = window.OP || (window.OP = {});
       canvas.classList.add('grab');
       return;
     }
+    if (BUILD_HOTKEY[code]) { startPlacing(BUILD_HOTKEY[code]); return; }
+
     if (code === 'KeyH') { showHud = !showHud; hud.root.classList.toggle('hidden', !showHud); }
-    else if (code === 'KeyF') { camera.centerOnGrid(55, 22); notify('Cámara sobre la base.', 'info'); }
+    else if (code === 'KeyF') { camera.centerOnGrid(World.baseMet.gx, World.baseMet.gy); notify('Cámara sobre la base.', 'info'); }
     else if (code === 'KeyX') { var n = units.stopSelected(); if (n) notify('Alto a ' + n + ' unidad(es).', 'info'); refreshSelection(); }
-    else if (code === 'Escape') { units.clearSelection(); refreshSelection(); }
-    else if (code === 'KeyA' && (event.ctrlKey || event.metaKey)) {
+    else if (code === 'Escape') {
+      if (!cancelPlacing()) { units.clearSelection(); selectedBuilding = null; refreshSelection(); }
+    } else if (code === 'Period') {
+      // Zapadores sin tajo: el atajo más útil de todo el juego.
+      units.clearSelection();
+      selectedBuilding = null;
+      var idle = 0;
+      units.units.forEach(function (u) {
+        if (u.playable && u.isWorker() && !u.job && !u.isMoving()) { u.selected = true; idle++; }
+      });
+      notify(idle ? idle + ' zapador(es) sin tajo.' : 'Todos los zapadores están ocupados.', idle ? 'info' : 'warn', 1800);
+      refreshSelection();
+    } else if (code === 'KeyA' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
+      selectedBuilding = null;
       units.selectAll();
       refreshSelection();
     } else if (code === 'Digit1' || code === 'Digit2' || code === 'Digit3') {
-      var type = ['fusilero', 'explorador', 'zapador'][parseInt(code.slice(5), 10) - 1];
+      if (selectedBuilding) { trainFromSelected(parseInt(code.slice(5), 10) - 1); return; }
+      var type = ['zapador', 'fusilero', 'explorador'][parseInt(code.slice(5), 10) - 1];
       if (!event.shiftKey) units.clearSelection();
       var picked = 0;
       units.units.forEach(function (u) {
@@ -334,6 +493,7 @@ var OP = window.OP || (window.OP = {});
 
   function onKeyUp(event) {
     input.keys[event.code] = false;
+    input.shiftHeld = event.shiftKey;
     if (event.code === 'Space') {
       input.spaceHeld = false;
       canvas.classList.remove('grab');
@@ -341,14 +501,13 @@ var OP = window.OP || (window.OP = {});
   }
 
   function keyboardCamera(dt) {
-    var speed = 900 / camera.zoom * dt;
+    var speed = 1000 / camera.zoom * dt;
     var dx = 0, dy = 0;
     if (input.keys.KeyA || input.keys.ArrowLeft) dx -= speed;
     if (input.keys.KeyD || input.keys.ArrowRight) dx += speed;
     if (input.keys.KeyW || input.keys.ArrowUp) dy -= speed;
     if (input.keys.KeyS || input.keys.ArrowDown) dy += speed;
     if (dx || dy) { camera.x += dx; camera.y += dy; camera.clamp(); }
-
     var zf = 1;
     if (input.keys.KeyE || input.keys.Equal || input.keys.NumpadAdd) zf = 1 + 1.5 * dt;
     if (input.keys.KeyQ || input.keys.Minus || input.keys.NumpadSubtract) zf = 1 - 1.5 * dt;
@@ -356,7 +515,43 @@ var OP = window.OP || (window.OP = {});
   }
 
   /* ---------------------------------------------------------------------------
-   * 3. MARCADORES Y AVISOS
+   * 4. PRODUCCIÓN
+   * ------------------------------------------------------------------------ */
+
+  function trainFromSelected(slot) {
+    var b = selectedBuilding;
+    if (!b || !b.def.trains || b.site) return;
+    var unitKey = b.def.trains[slot];
+    if (!unitKey) return;
+    queueUnit(b, unitKey);
+  }
+
+  function queueUnit(building, unitKey) {
+    var res = Eco.enqueue(building, unitKey);
+    if (res.ok) {
+      notify(Eco.UNITS[unitKey].name + ' en instrucción.', 'info', 1500);
+      return;
+    }
+    if (res.reason === 'sin-recursos') notify('Faltan recursos: ' + res.falta.join(' y ') + '.', 'warn');
+    else if (res.reason === 'sin-alojamiento') notify('Sin alojamiento. Levanta un alojamiento (tecla C).', 'warn', 3600);
+    else if (res.reason === 'cola-llena') notify('La cola está completa.', 'warn');
+    else if (res.reason === 'en-obra') notify('El edificio aún está en obras.', 'warn');
+  }
+
+  function spawnTrained(unitKey, building) {
+    var spot = World.freeTileNear(
+      building.tileX + building.tilesW / 2,
+      building.tileY + building.tilesH + 1, 10);
+    if (!spot) return false;
+    units.add({
+      type: unitKey, faction: building.faction,
+      gx: spot.gx + 0.5, gy: spot.gy + 0.5, dir: 1
+    });
+    return true;
+  }
+
+  /* ---------------------------------------------------------------------------
+   * 5. MARCADORES Y AVISOS
    * ------------------------------------------------------------------------ */
 
   function addMarker(gx, gy, kind) { markers.push({ gx: gx, gy: gy, kind: kind, life: 0, ttl: 0.85 }); }
@@ -368,14 +563,17 @@ var OP = window.OP || (window.OP = {});
     }
   }
 
+  var MARKER_RGB = {
+    bad: '255, 96, 80', adjusted: '255, 198, 96',
+    work: '232, 206, 122', good: '158, 240, 201'
+  };
+
   function drawMarkers() {
     for (var i = 0; i < markers.length; i++) {
       var m = markers[i];
       var t = m.life / m.ttl;
       var p = Iso.toScreen(m.gx, m.gy);
-      var rgb = m.kind === 'bad' ? '255, 96, 80'
-              : m.kind === 'adjusted' ? '255, 198, 96' : '158, 240, 201';
-      ctx.strokeStyle = 'rgba(' + rgb + ', ' + ((1 - t) * 0.9).toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(' + (MARKER_RGB[m.kind] || MARKER_RGB.good) + ', ' + ((1 - t) * 0.9).toFixed(3) + ')';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, 6 + 26 * t, (6 + 26 * t) / 2, 0, 0, Math.PI * 2);
@@ -393,31 +591,84 @@ var OP = window.OP || (window.OP = {});
   }
 
   /* ---------------------------------------------------------------------------
-   * 4. HUD
+   * 6. HUD
    * ------------------------------------------------------------------------ */
 
   var selectionSignature = null;
 
   function refreshSelection() {
-    var sel = units.selected();
-    var sig = sel.map(function (u) { return u.callsign + ':' + u.status; }).join('|')
-      + '/' + units.playable().length;
+    var sig;
+    if (selectedBuilding) {
+      sig = 'B' + selectedBuilding.uid + ':' +
+        (selectedBuilding.site ? Math.floor(selectedBuilding.progress) : 'ok') + ':' +
+        (selectedBuilding.queue || []).map(function (q) { return q.unit; }).join(',');
+    } else {
+      sig = units.selected().map(function (u) {
+        return u.callsign + ':' + u.status + ':' + Math.floor(u.carry.amount);
+      }).join('|') + '/' + units.playable().length;
+    }
     if (sig === selectionSignature) return;
     selectionSignature = sig;
 
+    if (selectedBuilding) { renderBuildingPanel(selectedBuilding); return; }
+
+    var sel = units.selected();
+    hud.selectionTitle.textContent = 'Fuerzas propias';
     hud.selectionCount.textContent = sel.length + ' / ' + units.playable().length;
+
     if (!sel.length) {
       hud.selection.innerHTML = '<li class="empty">Sin unidades seleccionadas</li>';
       return;
     }
-    hud.selection.innerHTML = sel.map(function (u) {
+    hud.selection.innerHTML = sel.slice(0, 12).map(function (u) {
+      var load = u.carry.amount > 0.5
+        ? '<span class="load ' + u.carry.type + '">' + Math.floor(u.carry.amount) + '</span>' : '';
       return '<li>' +
         '<span class="badge ' + u.type.key + '"></span>' +
         '<span class="callsign">' + esc(u.callsign) + '</span>' +
         '<span class="utype">' + esc(u.type.name) + '</span>' +
+        load +
         '<span class="ustatus">' + esc(u.status) + '</span>' +
         '</li>';
-    }).join('');
+    }).join('') + (sel.length > 12 ? '<li class="empty">y ' + (sel.length - 12) + ' más</li>' : '');
+  }
+
+  function renderBuildingPanel(b) {
+    hud.selectionTitle.textContent = b.def.name;
+    hud.selectionCount.textContent = b.site ? 'en obra' : 'operativo';
+
+    if (b.site) {
+      var pct = Math.round(100 * b.progress / b.needed);
+      hud.selection.innerHTML =
+        '<li class="empty">Obra al ' + pct + ' %. Manda zapadores con clic derecho.</li>';
+      return;
+    }
+
+    var html = '<li class="empty">' + esc(b.def.blurb) + '</li>';
+    if (b.def.trains) {
+      html += b.def.trains.map(function (key, i) {
+        var u = Eco.UNITS[key];
+        var poor = !Eco.canAfford(u.cost) || !Eco.hasRoom(key);
+        return '<li class="train' + (poor ? ' poor' : '') + '" data-unit="' + key + '">' +
+          '<span class="bk">' + (i + 1) + '</span>' +
+          '<span class="callsign">' + esc(u.name) + '</span>' +
+          '<span class="utype">' + esc(Eco.formatCost(u.cost)) + '</span>' +
+          '<span class="ustatus">' + u.time + ' s</span>' +
+          '</li>';
+      }).join('');
+
+      if (b.queue && b.queue.length) {
+        var head = b.queue[0];
+        var p = Math.round(100 * (1 - head.remaining / head.total));
+        html += '<li class="queue"><span class="qbar"><i style="width:' + p + '%"></i></span>' +
+          '<span class="ustatus">' + b.queue.length + ' en cola</span></li>';
+      }
+    }
+    hud.selection.innerHTML = html;
+
+    Array.prototype.forEach.call(hud.selection.querySelectorAll('.train'), function (li) {
+      li.addEventListener('click', function () { queueUnit(b, li.getAttribute('data-unit')); });
+    });
   }
 
   function esc(t) {
@@ -434,18 +685,40 @@ var OP = window.OP || (window.OP = {});
   function terrainLabel(g) {
     var gx = Math.floor(g.gx), gy = Math.floor(g.gy);
     if (!World.inside(gx, gy)) return 'fuera del sector';
+    var e = World.entityAt(gx, gy);
+    if (e && e.resource && e.resource.amount > 0) {
+      return Eco.LABEL[e.resource.type] + ' · ' + Math.ceil(e.resource.amount) + ' restantes';
+    }
+    if (e && e.kind === 'building') return e.def.name + (e.site ? ' (en obra)' : '');
     var base = TERRAIN_LABEL[World.typeAt(gx, gy)] || '—';
     if (World.typeAt(gx, gy) !== 'agua' && World.isBlocked(gx, gy)) return base + ' — ocupado';
     return base;
   }
 
+  var resourceSignature = null;
+
+  function refreshResources() {
+    var sig = Eco.KINDS.map(function (k) { return Math.floor(Eco.stock[k]); }).join('|') +
+      '/' + Eco.pop.used + '/' + Eco.pop.cap;
+    if (sig === resourceSignature) return;
+    resourceSignature = sig;
+
+    Eco.KINDS.forEach(function (k) {
+      hud.resources[k].value.textContent = Math.floor(Eco.stock[k]);
+    });
+    var popEl = hud.resources.poblacion;
+    popEl.value.textContent = Eco.pop.used + ' / ' + Eco.pop.cap;
+    popEl.item.classList.toggle('full', Eco.pop.used >= Eco.pop.cap);
+  }
+
   function drawMinimap() {
     var m = World.minimap();
+    World.syncMinimap();
     miniCtx.setTransform(1, 0, 0, 1, 0, 0);
     miniCtx.clearRect(0, 0, mini.width, mini.height);
-    miniCtx.drawImage(m.canvas, 0, 0);
+    miniCtx.drawImage(m.terrain, 0, 0);
+    miniCtx.drawImage(m.props, 0, 0);
 
-    // Unidades.
     for (var i = 0; i < units.units.length; i++) {
       var u = units.units[i];
       var px = (u.gx - u.gy) * m.scale + m.ox;
@@ -454,7 +727,6 @@ var OP = window.OP || (window.OP = {});
       miniCtx.fillRect(px - 1.5, py - 1.5, 3, 3);
     }
 
-    // Encuadre de la cámara.
     var v = camera.visibleWorldBounds(0);
     var pts = [
       Iso.toGrid(v.minX, v.minY), Iso.toGrid(v.maxX, v.minY),
@@ -473,10 +745,12 @@ var OP = window.OP || (window.OP = {});
   }
 
   /* ---------------------------------------------------------------------------
-   * 5. BUCLE
+   * 7. BUCLE
    * ------------------------------------------------------------------------ */
 
   var lastTime = 0;
+  var popTimer = 0;
+  var scene = [];
 
   function frame(now) {
     var dt = lastTime ? Math.min((now - lastTime) / 1000, 0.05) : 0;
@@ -485,7 +759,17 @@ var OP = window.OP || (window.OP = {});
 
     keyboardCamera(dt);
     units.update(World, dt);
+    Eco.updateProduction(World.entities, dt, spawnTrained);
+    popTimer -= dt;
+    if (popTimer <= 0) {
+      popTimer = 0.25;
+      Eco.recalcPop(units.units, World.entities);
+    }
     updateMarkers(dt);
+
+    // El edificio seleccionado pudo demolerse o terminarse.
+    if (selectedBuilding && World.entities.indexOf(selectedBuilding) < 0) selectedBuilding = null;
+
     render();
 
     stats.frames++; stats.acc += dt;
@@ -498,13 +782,13 @@ var OP = window.OP || (window.OP = {});
     hud.cursor.textContent = input.grid.gx.toFixed(1) + ', ' + input.grid.gy.toFixed(1);
     hud.terrain.textContent = terrainLabel(input.grid);
     hud.zoom.textContent = '×' + camera.zoom.toFixed(2);
+    refreshResources();
+    refreshBuildPanel();
     refreshSelection();
     drawMinimap();
 
     requestAnimationFrame(frame);
   }
-
-  var scene = [];
 
   function render() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -515,7 +799,7 @@ var OP = window.OP || (window.OP = {});
 
     World.drawTerrain(ctx, camera);
     World.drawWaterSparkle(ctx, camera, time);
-    drawHoverTile();
+    drawHover();
     Units.drawPaths(ctx, units.units);
     drawMarkers();
 
@@ -529,23 +813,93 @@ var OP = window.OP || (window.OP = {});
       else World.drawEntity(ctx, e);
     }
 
+    drawOverlays();
     drawSelectionBox();
   }
 
-  function drawHoverTile() {
+  /** Casilla bajo el cursor, o huella fantasma del edificio en colocación. */
+  function drawHover() {
     var gx = Math.floor(input.grid.gx), gy = Math.floor(input.grid.gy);
     if (!World.inside(gx, gy)) return;
-    var p = Iso.toScreen(gx + 0.5, gy + 0.5);
+
+    if (placing) {
+      var ok = World.canPlace(placing, gx, gy) && Eco.canAfford(placing.cost);
+      ctx.save();
+      ctx.fillStyle = ok ? 'rgba(120, 230, 160, 0.24)' : 'rgba(240, 110, 90, 0.26)';
+      ctx.strokeStyle = ok ? 'rgba(158, 240, 201, 0.9)' : 'rgba(255, 120, 100, 0.9)';
+      ctx.lineWidth = 1.6;
+      for (var dy = 0; dy < placing.h; dy++) {
+        for (var dx = 0; dx < placing.w; dx++) {
+          var p = Iso.toScreen(gx + dx + 0.5, gy + dy + 0.5);
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y - Iso.HH);
+          ctx.lineTo(p.x + Iso.HW, p.y);
+          ctx.lineTo(p.x, p.y + Iso.HH);
+          ctx.lineTo(p.x - Iso.HW, p.y);
+          ctx.closePath();
+          ctx.fill(); ctx.stroke();
+        }
+      }
+      ctx.restore();
+      return;
+    }
+
+    var q = Iso.toScreen(gx + 0.5, gy + 0.5);
     ctx.strokeStyle = World.isBlocked(gx, gy)
       ? 'rgba(255, 120, 100, 0.5)' : 'rgba(240, 250, 255, 0.45)';
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(p.x, p.y - Iso.HH);
-    ctx.lineTo(p.x + Iso.HW, p.y);
-    ctx.lineTo(p.x, p.y + Iso.HH);
-    ctx.lineTo(p.x - Iso.HW, p.y);
+    ctx.moveTo(q.x, q.y - Iso.HH);
+    ctx.lineTo(q.x + Iso.HW, q.y);
+    ctx.lineTo(q.x, q.y + Iso.HH);
+    ctx.lineTo(q.x - Iso.HW, q.y);
     ctx.closePath();
     ctx.stroke();
+  }
+
+  /** Barras de obra, de producción y aro del edificio seleccionado. */
+  function drawOverlays() {
+    for (var i = 0; i < scene.length; i++) {
+      var e = scene[i];
+      if (e.kind !== 'building') continue;
+
+      var top = e.sprite ? e.sy - e.sprite.ay - 8 : e.sy - 34;
+      if (e.site) {
+        drawBar(e.sx, top, e.progress / e.needed, '#e8ce7a');
+      } else if (e.queue && e.queue.length) {
+        var head = e.queue[0];
+        drawBar(e.sx, top, 1 - head.remaining / head.total, '#7fc3f0');
+      }
+
+      if (e === selectedBuilding) {
+        ctx.save();
+        ctx.strokeStyle = '#9ef0c9';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        var w = e.tilesW, h = e.tilesH;
+        var c0 = Iso.toScreen(e.tileX, e.tileY);
+        var c1 = Iso.toScreen(e.tileX + w, e.tileY);
+        var c2 = Iso.toScreen(e.tileX + w, e.tileY + h);
+        var c3 = Iso.toScreen(e.tileX, e.tileY + h);
+        ctx.beginPath();
+        ctx.moveTo(c0.x, c0.y); ctx.lineTo(c1.x, c1.y);
+        ctx.lineTo(c2.x, c2.y); ctx.lineTo(c3.x, c3.y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawBar(x, y, ratio, color) {
+    var w = 34, h = 5;
+    ctx.fillStyle = 'rgba(10, 14, 8, 0.75)';
+    ctx.fillRect(x - w / 2, y, w, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(x - w / 2 + 1, y + 1, (w - 2) * Math.max(0, Math.min(1, ratio)), h - 2);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - w / 2 + 0.5, y + 0.5, w - 1, h - 1);
   }
 
   function drawSelectionBox() {
@@ -568,6 +922,10 @@ var OP = window.OP || (window.OP = {});
   OP.Game = {
     get camera() { return camera; },
     get units() { return units; },
+    get selectedBuilding() { return selectedBuilding; },
+    startPlacing: startPlacing,
+    tryPlace: tryPlace,
+    queueUnit: queueUnit,
     notify: notify
   };
 

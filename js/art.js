@@ -488,6 +488,211 @@ var OP = window.OP || (window.OP = {});
     return sprite(c, ax, ay);
   }
 
+  /** Almendro: copa clara y fruto visible. Fuente de víveres. */
+  function paintFruitTree(variant) {
+    var W = 70, H = 84, ax = W / 2, ay = H - 10;
+    var c = makeCanvas(W, H), x = c.getContext('2d');
+    var rand = rng(variant * 5381 + 71);
+    var scale = 0.88 + rand() * 0.26;
+
+    groundShadow(x, ax + 4, ay + 1, 16 * scale, 8 * scale);
+
+    x.strokeStyle = '#7a6349';
+    x.lineWidth = 4.4 * scale;
+    x.lineCap = 'round';
+    x.beginPath();
+    x.moveTo(ax, ay);
+    x.lineTo(ax + 1 * scale, ay - 18 * scale);
+    x.stroke();
+    x.lineWidth = 2.2 * scale;
+    x.beginPath();
+    x.moveTo(ax + 1 * scale, ay - 16 * scale);
+    x.lineTo(ax - 9 * scale, ay - 25 * scale);
+    x.moveTo(ax + 1 * scale, ay - 16 * scale);
+    x.lineTo(ax + 10 * scale, ay - 24 * scale);
+    x.stroke();
+
+    [{ dx: 0, dy: -33, r: 18, c: '#8aa04f' },
+     { dx: -12, dy: -27, r: 13, c: '#7d9345' },
+     { dx: 12, dy: -28, r: 13.5, c: '#96ab5c' },
+     { dx: -2, dy: -41, r: 12, c: '#9fb464' }].forEach(function (b) {
+      x.fillStyle = b.c;
+      x.beginPath();
+      x.ellipse(ax + b.dx * scale, ay + b.dy * scale, b.r * scale, b.r * 0.84 * scale, 0, 0, Math.PI * 2);
+      x.fill();
+    });
+
+    // Fruto: puntos claros que distinguen el frutal del olivo de un vistazo.
+    x.fillStyle = '#e8c87a';
+    for (var i = 0; i < 13; i++) {
+      x.beginPath();
+      x.arc(ax + (rand() - 0.5) * 30 * scale, ay - (22 + rand() * 24) * scale,
+            1.5 + rand() * 1.1, 0, Math.PI * 2);
+      x.fill();
+    }
+    return sprite(c, ax, ay);
+  }
+
+  /** Tocón: lo que queda de un árbol talado. */
+  function paintStump(variant) {
+    var W = 34, H = 28, ax = W / 2, ay = H - 6;
+    var c = makeCanvas(W, H), x = c.getContext('2d');
+    var rand = rng(variant * 911 + 13);
+    groundShadow(x, ax + 2, ay, 9, 4.5, 0.2);
+    x.fillStyle = '#6b573a';
+    x.beginPath();
+    x.moveTo(ax - 5, ay - 2); x.lineTo(ax - 5, ay - 7);
+    x.lineTo(ax + 5, ay - 7); x.lineTo(ax + 5, ay - 2);
+    x.closePath(); x.fill();
+    x.fillStyle = '#9b8259';
+    x.beginPath(); x.ellipse(ax, ay - 7, 5.2, 2.6, 0, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#7d6844';
+    x.lineWidth = 0.8;
+    x.beginPath(); x.ellipse(ax, ay - 7, 2.8, 1.4, 0, 0, Math.PI * 2); x.stroke();
+    // Astillas alrededor.
+    x.fillStyle = '#8a7350';
+    for (var i = 0; i < 4; i++) {
+      x.fillRect(ax + (rand() - 0.5) * 18, ay - rand() * 3, 2.5, 1.2);
+    }
+    return sprite(c, ax, ay);
+  }
+
+  /** Montón de chatarra: carrocerías y vigas. Fuente de metal. */
+  function paintScrap(variant) {
+    var W = 72, H = 56, ax = W / 2, ay = H - 8;
+    var c = makeCanvas(W, H), x = c.getContext('2d');
+    var rand = rng(variant * 7549 + 23);
+    groundShadow(x, ax + 4, ay, 22, 10, 0.26);
+
+    // Carrocería volcada.
+    var bx = ax - 4, by = ay - 3;
+    x.fillStyle = '#6d6257';
+    x.beginPath();
+    x.moveTo(bx - 17, by - 2); x.lineTo(bx - 9, by - 13);
+    x.lineTo(bx + 11, by - 13); x.lineTo(bx + 18, by - 1);
+    x.lineTo(bx + 9, by + 5); x.lineTo(bx - 10, by + 5);
+    x.closePath(); x.fill();
+    x.fillStyle = '#877a6c';
+    x.beginPath();
+    x.moveTo(bx - 9, by - 13); x.lineTo(bx + 11, by - 13);
+    x.lineTo(bx + 6, by - 18); x.lineTo(bx - 5, by - 18);
+    x.closePath(); x.fill();
+    // Óxido.
+    x.fillStyle = 'rgba(150, 84, 42, 0.55)';
+    for (var i = 0; i < 14; i++) {
+      x.beginPath();
+      x.ellipse(bx + (rand() - 0.5) * 32, by - rand() * 15, 1.5 + rand() * 3.5, 1 + rand() * 2, 0, 0, Math.PI * 2);
+      x.fill();
+    }
+    // Vigas apiladas.
+    x.strokeStyle = '#5d554b';
+    x.lineWidth = 3.2;
+    x.lineCap = 'round';
+    for (var j = 0; j < 4; j++) {
+      var jx = ax + 8 + rand() * 14, jy = ay - 2 - j * 3.2;
+      x.beginPath();
+      x.moveTo(jx - 12, jy + 4); x.lineTo(jx + 10, jy - 3);
+      x.stroke();
+    }
+    return sprite(c, ax, ay);
+  }
+
+  /** Huerta: parcela roturada con caballones. Se dibuja plana sobre el suelo. */
+  function paintFarm(w, h, growth) {
+    var pad = 14;
+    function P(gx, gy) { return { x: (gx - gy) * PX, y: (gx + gy) * PY }; }
+    var corners = [P(0, 0), P(w, 0), P(w, h), P(0, h)];
+    var xs = corners.map(function (p) { return p.x; });
+    var ys = corners.map(function (p) { return p.y; });
+    var minX = Math.min.apply(null, xs) - pad, maxX = Math.max.apply(null, xs) + pad;
+    var minY = Math.min.apply(null, ys) - pad, maxY = Math.max.apply(null, ys) + pad;
+
+    var c = makeCanvas(Math.ceil(maxX - minX), Math.ceil(maxY - minY));
+    var x = c.getContext('2d');
+    var ox = -minX, oy = -minY;
+    var anchor = P(w / 2, h / 2);
+    function T(p) { return { x: p.x + ox, y: p.y + oy }; }
+
+    var A = T(corners[0]), B = T(corners[1]), C = T(corners[2]), D = T(corners[3]);
+    quad(x, A, B, C, D, '#6f5636', 'rgba(50, 38, 22, 0.7)');
+
+    // Caballones en la diagonal de la parcela.
+    x.save();
+    x.beginPath();
+    x.moveTo(A.x, A.y); x.lineTo(B.x, B.y); x.lineTo(C.x, C.y); x.lineTo(D.x, D.y);
+    x.closePath();
+    x.clip();
+    var rows = w * 4;
+    for (var r = 0; r <= rows; r++) {
+      var f = r / rows;
+      var p1 = { x: A.x + (B.x - A.x) * f, y: A.y + (B.y - A.y) * f };
+      var p2 = { x: D.x + (C.x - D.x) * f, y: D.y + (C.y - D.y) * f };
+      x.strokeStyle = r % 2 ? 'rgba(139, 110, 70, 0.75)' : 'rgba(76, 58, 34, 0.55)';
+      x.lineWidth = 2.6;
+      x.beginPath(); x.moveTo(p1.x, p1.y); x.lineTo(p2.x, p2.y); x.stroke();
+
+      // Mata verde sobre el caballón, según lo crecida que esté la huerta.
+      if (growth > 0 && r % 2 === 0) {
+        var n = 5;
+        for (var k = 1; k < n; k++) {
+          var g = k / n;
+          x.fillStyle = growth > 0.6 ? '#6d8c3f' : '#7b8f52';
+          x.beginPath();
+          x.ellipse(p1.x + (p2.x - p1.x) * g, p1.y + (p2.y - p1.y) * g,
+                    2.6 * growth, 1.8 * growth, 0, 0, Math.PI * 2);
+          x.fill();
+        }
+      }
+    }
+    x.restore();
+    return sprite(c, anchor.x + ox, anchor.y + oy);
+  }
+
+  /** Andamio de obra: postes, cinta y tierra removida. */
+  function paintScaffold(w, h) {
+    var pad = 26, tall = 1.0;
+    function P(gx, gy, gz) { return { x: (gx - gy) * PX, y: (gx + gy) * PY - (gz || 0) * PZ }; }
+    var base = [P(0, 0), P(w, 0), P(w, h), P(0, h)];
+    var top = [P(0, 0, tall), P(w, 0, tall), P(w, h, tall), P(0, h, tall)];
+    var all = base.concat(top);
+    var minX = Math.min.apply(null, all.map(function (p) { return p.x; })) - pad;
+    var maxX = Math.max.apply(null, all.map(function (p) { return p.x; })) + pad;
+    var minY = Math.min.apply(null, all.map(function (p) { return p.y; })) - pad;
+    var maxY = Math.max.apply(null, all.map(function (p) { return p.y; })) + pad;
+
+    var c = makeCanvas(Math.ceil(maxX - minX), Math.ceil(maxY - minY));
+    var x = c.getContext('2d');
+    var ox = -minX, oy = -minY;
+    var anchor = P(w / 2, h / 2);
+    function T(p) { return { x: p.x + ox, y: p.y + oy }; }
+    var A = T(base[0]), B = T(base[1]), C = T(base[2]), D = T(base[3]);
+
+    // Tierra removida.
+    quad(x, A, B, C, D, 'rgba(104, 82, 50, 0.85)', 'rgba(58, 44, 26, 0.8)');
+
+    // Postes en las cuatro esquinas.
+    [[0, 0], [w, 0], [w, h], [0, h]].forEach(function (corner) {
+      var b = T(P(corner[0], corner[1]));
+      var t = T(P(corner[0], corner[1], tall));
+      x.strokeStyle = '#8a6f45';
+      x.lineWidth = 3;
+      x.lineCap = 'round';
+      x.beginPath(); x.moveTo(b.x, b.y); x.lineTo(t.x, t.y); x.stroke();
+    });
+
+    // Cinta de obra entre los postes.
+    var tA = T(top[0]), tB = T(top[1]), tC = T(top[2]), tD = T(top[3]);
+    x.setLineDash([7, 5]);
+    x.strokeStyle = '#e0b23c';
+    x.lineWidth = 2;
+    x.beginPath();
+    x.moveTo(tA.x, tA.y); x.lineTo(tB.x, tB.y); x.lineTo(tC.x, tC.y);
+    x.lineTo(tD.x, tD.y); x.closePath();
+    x.stroke();
+    x.setLineDash([]);
+    return sprite(c, anchor.x + ox, anchor.y + oy);
+  }
+
   /* ---------------------------------------------------------------------------
    * 4. EDIFICIOS
    *
@@ -918,6 +1123,64 @@ var OP = window.OP || (window.OP = {});
     return { img: c, cols: cols, fw: FRAME_W, fh: FRAME_H, ax: FRAME_AX, ay: FRAME_AY };
   }
 
+  /** Iconos de 32×32 para el marcador de recursos del HUD. */
+  function paintIcon(kind) {
+    var c = makeCanvas(32, 32), x = c.getContext('2d');
+    x.lineCap = 'round';
+    x.lineJoin = 'round';
+
+    if (kind === 'viveres') {
+      // Espiga.
+      x.strokeStyle = '#b98f3c';
+      x.lineWidth = 2.6;
+      x.beginPath(); x.moveTo(16, 29); x.lineTo(16, 9); x.stroke();
+      x.fillStyle = '#e0b551';
+      for (var i = 0; i < 4; i++) {
+        var y = 10 + i * 4.6;
+        x.beginPath(); x.ellipse(11.5, y + 1.5, 4.6, 2.5, -0.5, 0, Math.PI * 2); x.fill();
+        x.beginPath(); x.ellipse(20.5, y + 1.5, 4.6, 2.5, 0.5, 0, Math.PI * 2); x.fill();
+      }
+      x.fillStyle = '#f0cd77';
+      x.beginPath(); x.ellipse(16, 7, 3, 5, 0, 0, Math.PI * 2); x.fill();
+    } else if (kind === 'madera') {
+      // Tronco con anillos.
+      x.fillStyle = '#8a6a41';
+      x.beginPath(); x.roundRect ? x.roundRect(4, 11, 24, 12, 5) : x.rect(4, 11, 24, 12);
+      x.fill();
+      x.fillStyle = '#b08a56';
+      x.beginPath(); x.ellipse(26, 17, 3.2, 6, 0, 0, Math.PI * 2); x.fill();
+      x.strokeStyle = '#7a5c37';
+      x.lineWidth = 1.3;
+      x.beginPath(); x.ellipse(26, 17, 1.6, 3, 0, 0, Math.PI * 2); x.stroke();
+      x.strokeStyle = 'rgba(90, 66, 38, 0.7)';
+      x.lineWidth = 1.1;
+      x.beginPath(); x.moveTo(9, 13); x.lineTo(9, 21);
+      x.moveTo(15, 12.5); x.lineTo(15, 21.5); x.stroke();
+    } else if (kind === 'metal') {
+      // Lingote.
+      x.fillStyle = '#98a0a6';
+      x.beginPath();
+      x.moveTo(7, 22); x.lineTo(11, 13); x.lineTo(25, 13); x.lineTo(28, 22);
+      x.closePath(); x.fill();
+      x.fillStyle = '#c2cad0';
+      x.beginPath();
+      x.moveTo(11, 13); x.lineTo(25, 13); x.lineTo(23, 10); x.lineTo(13, 10);
+      x.closePath(); x.fill();
+      x.strokeStyle = '#6f777d';
+      x.lineWidth = 1.2;
+      x.beginPath(); x.moveTo(7, 22); x.lineTo(28, 22); x.stroke();
+    } else {
+      // Silueta de persona, para la población.
+      x.fillStyle = '#7fb3ee';
+      x.beginPath(); x.arc(16, 10, 4.6, 0, Math.PI * 2); x.fill();
+      x.beginPath();
+      x.moveTo(9, 27); x.quadraticCurveTo(9, 16, 16, 16);
+      x.quadraticCurveTo(23, 16, 23, 27);
+      x.closePath(); x.fill();
+    }
+    return c.toDataURL('image/png');
+  }
+
   /* ---------------------------------------------------------------------------
    * 6. CONSTRUCCIÓN DEL CATÁLOGO
    * ------------------------------------------------------------------------ */
@@ -931,7 +1194,8 @@ var OP = window.OP || (window.OP = {});
     TILE_W: TILE_W, TILE_H: TILE_H, PX: PX, PY: PY, PZ: PZ,
     TERRAIN: TERRAIN,
     WALK_FRAMES: WALK_FRAMES,
-    tiles: {}, fringes: {}, shores: [], props: {}, buildings: {}, units: {}, cloud: null,
+    tiles: {}, fringes: {}, shores: [], props: {}, buildings: {}, units: {},
+    farm: [], scaffolds: {}, icons: {}, cloud: null,
     ready: false
   };
 
@@ -953,6 +1217,25 @@ var OP = window.OP || (window.OP = {});
     art.props.cajas = [0, 1, 2].map(paintCrate);
     art.props.bidones = [0, 1, 2].map(paintBarrel);
     art.props.sacos = [0, 1].map(paintSandbags);
+    art.props.frutal = [0, 1, 2, 3].map(paintFruitTree);
+    art.props.chatarra = [0, 1, 2].map(paintScrap);
+    art.props.tocon = [0, 1, 2].map(paintStump);
+
+    // Huerta en cuatro estados de crecimiento.
+    art.farm = [0, 0.35, 0.7, 1].map(function (g) { return paintFarm(2, 2, g); });
+
+    // Un andamio por cada huella de edificio en uso.
+    art.scaffolds = {};
+    [[1, 1], [2, 2], [2, 3], [3, 2], [3, 3]].forEach(function (d) {
+      art.scaffolds[d[0] + 'x' + d[1]] = paintScaffold(d[0], d[1]);
+    });
+
+    art.icons = {
+      viveres: paintIcon('viveres'),
+      madera: paintIcon('madera'),
+      metal: paintIcon('metal'),
+      poblacion: paintIcon('poblacion')
+    };
 
     art.shores = [0, 1, 2, 3].map(paintShore);
 
@@ -961,6 +1244,7 @@ var OP = window.OP || (window.OP = {});
       barracon: { w: 3, h: 2, height: 0.95, wall: '#8d8a78', roofColor: '#5f6b57', roof: 'gable', windows: 3, seed: 23 },
       almacen:  { w: 2, h: 3, height: 1.1, wall: '#87826f', roofColor: '#6b6355', roof: 'gable', windows: 0, seed: 31 },
       casa:     { w: 2, h: 2, height: 0.85, wall: '#c3b393', roofColor: '#9c5a3c', roof: 'gable', windows: 2, seed: 43 },
+      deposito: { w: 2, h: 2, height: 0.75, wall: '#8f8a76', roofColor: '#69705c', roof: 'gable', windows: 0, sandbags: true, seed: 71 },
       torre:    { w: 1, h: 1, height: 2.3, wall: '#9d9588', roofColor: '#6a6459', roof: 'flat',  windows: 1, mast: true, door: false, seed: 57 }
     };
 

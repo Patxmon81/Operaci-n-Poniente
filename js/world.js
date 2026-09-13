@@ -1,13 +1,13 @@
 /* =============================================================================
  * OPERACIÓN PONIENTE — Motor isométrico
- * js/world.js — Escenario, terreno, entidades estáticas y navegación.
+ * js/world.js — Escenario, terreno, entidades, recursos y navegación.
  *
- * Escenario: «Vega del Jarama», al noreste de Madrid. Un río cruza el sector en
- * diagonal, con una base del Mando de Emergencia Territorial en la margen
- * oriental y un puesto avanzado del Consorcio Poniente en la occidental.
+ * Escenario: «Vega del Jarama», 128×128 tiles. El río parte el sector en dos y
+ * sólo se cruza por el vado. Al este, la base del Mando de Emergencia
+ * Territorial; al oeste, un puesto avanzado del Consorcio Poniente.
  *
- * El terreno se hornea por sectores de 16×16 tiles en mapas de bits fuera de
- * pantalla; en cada fotograma sólo se vuelcan los sectores visibles.
+ * El terreno se hornea por sectores de 16×16 tiles, con caché acotada y
+ * desalojo del menos usado: un mapa de este tamaño no cabe entero en memoria.
  * ========================================================================== */
 
 var OP = window.OP || (window.OP = {});
@@ -17,21 +17,26 @@ var OP = window.OP || (window.OP = {});
 
   var Iso = OP.Iso;
   var Art = OP.Art;
+  var Eco = OP.Economy;
 
-  var W = 80, H = 80;                 // tamaño del mapa, en tiles
+  var W = 128, H = 128;
   var CHUNK = 16;
   var CHUNKS_X = Math.ceil(W / CHUNK);
   var CHUNKS_Y = Math.ceil(H / CHUNK);
+  var CHUNK_LIMIT = 54;              // sectores horneados que se conservan
 
   var TYPES = ['agua', 'arena', 'tierra', 'secano', 'pasto', 'matorral'];
   var TYPE_INDEX = {};
   TYPES.forEach(function (t, i) { TYPE_INDEX[t] = i; });
 
-  var tiles = new Uint8Array(W * H);       // índice en TYPES
-  var variant = new Uint8Array(W * H);     // variante del sprite de terreno
-  var blocked = new Uint8Array(W * H);     // 1 = intransitable
-  var entities = [];                       // props y edificios, con profundidad
-  var chunkCache = [];                     // sectores horneados, o null
+  var tiles = new Uint8Array(W * H);
+  var variant = new Uint8Array(W * H);
+  var blocked = new Uint8Array(W * H);
+  var entities = [];
+  var chunkCache = new Map();
+  var chunkClock = 0;
+  var entityClock = 0;
+  var propsDirty = true;
 
   function idx(gx, gy) { return gy * W + gx; }
   function inside(gx, gy) { return gx >= 0 && gx < W && gy >= 0 && gy < H; }
@@ -63,40 +68,63 @@ var OP = window.OP || (window.OP = {});
   }
 
   /* ---------------------------------------------------------------------------
-   * 2. GENERACIÓN DEL ESCENARIO
+   * 2. GEOGRAFÍA DEL SECTOR
    * ------------------------------------------------------------------------ */
 
-  /** Eje del río para una fila dada: baja en diagonal y serpentea. */
   function riverAxis(gy) {
-    return 16 + gy * 0.42 + Math.sin(gy * 0.11) * 6.5 + Math.sin(gy * 0.31) * 2.2;
+    return 24 + gy * 0.40 + Math.sin(gy * 0.055) * 10 + Math.sin(gy * 0.17) * 3.4;
   }
 
-  function riverWidth(gy) { return 3.1 + Math.sin(gy * 0.07 + 1.2) * 1.1; }
+  function riverWidth(gy) { return 3.4 + Math.sin(gy * 0.045 + 1.2) * 1.3; }
 
-  /** Vado del Jarama: el único paso a la margen occidental. */
-  var FORD = [[33, 35], [27, 36], [21, 37], [14, 38]];
+  /** Vado: el único paso a la margen occidental. */
+  var FORD = [[64, 56], [58, 58], [52, 60], [46, 61]];
 
   var ROADS = [
     // De la base al vado y, cruzándolo, hasta el puesto del Consorcio.
-    [[57, 20], [50, 26], [44, 30], [38, 33], [33, 35], [27, 36], [21, 37], [17, 45], [20, 57]],
-    [[57, 22], [60, 32], [63, 44], [62, 56], [66, 68]],
-    [[57, 21], [66, 18], [74, 14]]
+    [[92, 36], [86, 44], [78, 50], [70, 54], [64, 56], [58, 58], [52, 60],
+     [46, 61], [38, 70], [33, 84], [30, 94]],
+    // Cinturón oriental: base → olivar → sureste.
+    [[94, 40], [98, 56], [96, 72], [100, 88], [108, 104]],
+    // Salida norte.
+    [[92, 34], [100, 26], [112, 20]]
   ];
 
-  var BUILDINGS = [
-    { id: 'mando',    fac: 'met', gx: 55, gy: 19, w: 3, h: 3 },
-    { id: 'barracon', fac: 'met', gx: 50, gy: 17, w: 3, h: 2 },
-    { id: 'barracon', fac: 'met', gx: 50, gy: 23, w: 3, h: 2 },
-    { id: 'almacen',  fac: 'met', gx: 59, gy: 23, w: 2, h: 3 },
-    { id: 'torre',    fac: 'met', gx: 54, gy: 15, w: 1, h: 1 },
-    { id: 'torre',    fac: 'met', gx: 60, gy: 28, w: 1, h: 1 },
-    { id: 'casa',     fac: 'met', gx: 62, gy: 17, w: 2, h: 2 },
-    { id: 'casa',     fac: 'met', gx: 47, gy: 27, w: 2, h: 2 },
+  var BASE_MET = { gx: 92, gy: 38 };
+  var BASE_PON = { gx: 30, gy: 96 };
 
-    { id: 'barracon', fac: 'pon', gx: 18, gy: 58, w: 3, h: 2 },
-    { id: 'torre',    fac: 'pon', gx: 23, gy: 57, w: 1, h: 1 },
-    { id: 'almacen',  fac: 'pon', gx: 17, gy: 62, w: 2, h: 3 },
-    { id: 'casa',     fac: 'pon', gx: 22, gy: 62, w: 2, h: 2 }
+  var START_BUILDINGS = [
+    { id: 'mando',    fac: 'met', gx: 91, gy: 36 },
+    { id: 'barracon', fac: 'met', gx: 86, gy: 34 },
+    { id: 'casa',     fac: 'met', gx: 87, gy: 41 },
+    { id: 'casa',     fac: 'met', gx: 96, gy: 33 },
+    { id: 'torre',    fac: 'met', gx: 90, gy: 32 },
+    { id: 'torre',    fac: 'met', gx: 96, gy: 41 },
+
+    { id: 'barracon', fac: 'pon', gx: 28, gy: 94 },
+    { id: 'torre',    fac: 'pon', gx: 33, gy: 93 },
+    { id: 'almacen',  fac: 'pon', gx: 27, gy: 98 },
+    { id: 'casa',     fac: 'pon', gx: 32, gy: 98 }
+  ];
+
+  /** Manchas de chatarra: el metal del sector. */
+  var SCRAP_FIELDS = [
+    { gx: 101, gy: 45, r: 4.2 }, { gx: 78, gy: 28, r: 3.8 },
+    { gx: 84, gy: 62, r: 4.2 },  { gx: 112, gy: 74, r: 4.0 },
+    { gx: 44, gy: 74, r: 3.6 },  { gx: 60, gy: 96, r: 4.0 }
+  ];
+
+  /** Pinares de partida: madera a tiro de piedra de cada base. */
+  var COPSES = [
+    { gx: 84, gy: 45, r: 3.8 }, { gx: 100, gy: 30, r: 3.4 },
+    { gx: 88, gy: 27, r: 3.0 }, { gx: 23, gy: 91, r: 3.2 }
+  ];
+
+  /** Bosquetes de frutales: los víveres iniciales. */
+  var ORCHARDS = [
+    { gx: 97, gy: 44, r: 4.0 }, { gx: 85, gy: 29, r: 3.4 },
+    { gx: 102, gy: 34, r: 3.2 }, { gx: 74, gy: 46, r: 3.6 },
+    { gx: 36, gy: 88, r: 3.4 }, { gx: 24, gy: 90, r: 3.0 }
   ];
 
   function distanceToPolyline(gx, gy, pts) {
@@ -106,38 +134,37 @@ var OP = window.OP || (window.OP = {});
       var dx = bx - ax, dy = by - ay;
       var len2 = dx * dx + dy * dy;
       var t = len2 ? Math.max(0, Math.min(1, ((gx - ax) * dx + (gy - ay) * dy) / len2)) : 0;
-      var px = ax + dx * t, py = ay + dy * t;
-      best = Math.min(best, Math.hypot(gx - px, gy - py));
+      best = Math.min(best, Math.hypot(gx - (ax + dx * t), gy - (ay + dy * t)));
     }
     return best;
   }
 
   function generateTerrain() {
-    for (var gy = 0; gy < H; gy++) {
+    var gx, gy, i, r;
+
+    for (gy = 0; gy < H; gy++) {
       var axis = riverAxis(gy), half = riverWidth(gy);
-      for (var gx = 0; gx < W; gx++) {
-        var i = idx(gx, gy);
+      for (gx = 0; gx < W; gx++) {
+        i = idx(gx, gy);
         var dRiver = Math.abs(gx - axis);
-        var wobble = (fbm(gx * 0.18, gy * 0.18, 91) - 0.5) * 1.8;
+        var wobble = (fbm(gx * 0.18, gy * 0.18, 91) - 0.5) * 2.0;
         var type;
 
         if (dRiver + wobble < half) {
           type = 'agua';
-        } else if (dRiver + wobble < half + 1.8) {
+        } else if (dRiver + wobble < half + 1.9) {
           type = 'arena';
         } else {
-          // Humedad: alta junto al río y en las vaguadas del ruido.
-          var wet = fbm(gx * 0.055, gy * 0.055, 17);
-          var proximity = Math.max(0, 1 - (dRiver - half) / 16);
-          var moisture = wet * 0.72 + proximity * 0.45;
+          var wet = fbm(gx * 0.042, gy * 0.042, 17);
+          var proximity = Math.max(0, 1 - (dRiver - half) / 20);
+          var moisture = wet * 0.72 + proximity * 0.42;
           if (moisture > 0.62) type = 'pasto';
           else if (moisture > 0.42) type = 'secano';
-          else type = fbm(gx * 0.13, gy * 0.13, 53) > 0.55 ? 'matorral' : 'secano';
+          else type = fbm(gx * 0.10, gy * 0.10, 53) > 0.55 ? 'matorral' : 'secano';
         }
 
-        // Los caminos pisan el terreno natural.
-        for (var r = 0; r < ROADS.length; r++) {
-          if (distanceToPolyline(gx, gy, ROADS[r]) < 1.25 && type !== 'agua') {
+        for (r = 0; r < ROADS.length; r++) {
+          if (distanceToPolyline(gx, gy, ROADS[r]) < 1.3 && type !== 'agua') {
             type = 'tierra';
             break;
           }
@@ -149,90 +176,158 @@ var OP = window.OP || (window.OP = {});
       }
     }
 
-    // El vado se abre al final: convierte el cauce en arenal transitable.
-    for (var fy = 0; fy < H; fy++) {
-      for (var fx = 0; fx < W; fx++) {
-        if (distanceToPolyline(fx, fy, FORD) > 1.4) continue;
-        var fi = idx(fx, fy);
-        tiles[fi] = TYPE_INDEX['arena'];
-        blocked[fi] = 0;
-      }
-    }
-
-    // Explanada de tierra batida bajo cada base.
-    [{ x: 55, y: 21, r: 8 }, { x: 20, y: 60, r: 5.5 }].forEach(function (base) {
-      for (var gy2 = 0; gy2 < H; gy2++) {
-        for (var gx2 = 0; gx2 < W; gx2++) {
-          var d = Math.hypot(gx2 - base.x, gy2 - base.y);
-          if (d < base.r - fbm(gx2 * 0.3, gy2 * 0.3, 77) * 2.6 && typeAt(gx2, gy2) !== 'agua') {
-            tiles[idx(gx2, gy2)] = TYPE_INDEX['tierra'];
+    // Explanadas de tierra batida bajo cada base.
+    [{ x: BASE_MET.gx, y: BASE_MET.gy, r: 10 }, { x: BASE_PON.gx, y: BASE_PON.gy, r: 7 }]
+      .forEach(function (base) {
+        for (var by = 0; by < H; by++) {
+          for (var bx = 0; bx < W; bx++) {
+            var d = Math.hypot(bx - base.x, by - base.y);
+            if (d < base.r - fbm(bx * 0.3, by * 0.3, 77) * 3 && typeAt(bx, by) !== 'agua') {
+              tiles[idx(bx, by)] = TYPE_INDEX['tierra'];
+            }
           }
         }
+      });
+
+    // El vado se abre al final: convierte el cauce en arenal transitable.
+    for (gy = 0; gy < H; gy++) {
+      for (gx = 0; gx < W; gx++) {
+        if (distanceToPolyline(gx, gy, FORD) > 1.5) continue;
+        i = idx(gx, gy);
+        tiles[i] = TYPE_INDEX['arena'];
+        blocked[i] = 0;
       }
+    }
+  }
+
+  /* ---------------------------------------------------------------------------
+   * 3. ENTIDADES
+   * ------------------------------------------------------------------------ */
+
+  function pushEntity(e) {
+    e.uid = ++entityClock;
+    entities.push(e);
+    propsDirty = true;
+    return e;
+  }
+
+  function occupy(gx, gy, w, h, value) {
+    for (var dy = 0; dy < h; dy++) {
+      for (var dx = 0; dx < w; dx++) {
+        if (inside(gx + dx, gy + dy)) blocked[idx(gx + dx, gy + dy)] = value;
+      }
+    }
+  }
+
+  /** Retira una entidad del mundo y libera sus casillas. */
+  function removeEntity(e) {
+    var i = entities.indexOf(e);
+    if (i < 0) return false;
+    entities.splice(i, 1);
+    occupy(e.tileX, e.tileY, e.tilesW || 1, e.tilesH || 1, 0);
+    propsDirty = true;
+    return true;
+  }
+
+  /** Sustituye un árbol agotado por su tocón: da constancia de que se taló. */
+  function leaveStump(e) {
+    var set = Art.props.tocon;
+    pushEntity({
+      kind: 'prop', prop: 'tocon', decor: true,
+      tileX: e.tileX, tileY: e.tileY, tilesW: 1, tilesH: 1,
+      gx: e.gx, gy: e.gy, depth: e.depth,
+      sprite: set[(hash(e.tileX, e.tileY, 771) * set.length) | 0]
     });
   }
 
+  var RESOURCE_OF_PROP = {
+    pino: { type: 'madera', amount: 110 },
+    olivo: { type: 'madera', amount: 95 },
+    frutal: { type: 'viveres', amount: 180 },
+    chatarra: { type: 'metal', amount: 300 }
+  };
+
   function addProp(kind, gx, gy, spriteVariant) {
-    if (!inside(gx, gy) || blocked[idx(gx, gy)]) return;
+    if (!inside(gx, gy) || blocked[idx(gx, gy)]) return null;
     var set = Art.props[kind];
-    entities.push({
-      kind: 'prop',
+    if (!set) return null;
+    var res = RESOURCE_OF_PROP[kind];
+    var e = pushEntity({
+      kind: 'prop', prop: kind,
+      tileX: gx, tileY: gy, tilesW: 1, tilesH: 1,
       gx: gx + 0.5, gy: gy + 0.5,
       depth: gx + gy + 1,
-      sprite: set[spriteVariant % set.length]
+      sprite: set[spriteVariant % set.length],
+      resource: res ? { type: res.type, amount: res.amount, max: res.amount } : null
     });
     blocked[idx(gx, gy)] = 1;
+    return e;
   }
 
   function plantVegetation() {
     var gx, gy, n;
 
-    // Pinares en las lomas secas, lejos del río y de las bases.
     for (gy = 0; gy < H; gy++) {
       for (gx = 0; gx < W; gx++) {
-        if (typeAt(gx, gy) === 'agua' || typeAt(gx, gy) === 'tierra') continue;
-        if (Math.hypot(gx - 55, gy - 21) < 11) continue;
-        if (Math.hypot(gx - 20, gy - 60) < 8) continue;
+        var t = typeAt(gx, gy);
+        if (t === 'agua' || t === 'tierra') continue;
+        if (Math.hypot(gx - BASE_MET.gx, gy - BASE_MET.gy) < 12) continue;
+        if (Math.hypot(gx - BASE_PON.gx, gy - BASE_PON.gy) < 9) continue;
 
-        var forest = fbm(gx * 0.085, gy * 0.085, 131);
+        var forest = fbm(gx * 0.068, gy * 0.068, 131);
         n = hash(gx, gy, 211);
-        if (forest > 0.60 && n > 0.52) {
-          addProp('pino', gx, gy, (n * 97) | 0);
-        } else if (typeAt(gx, gy) === 'matorral' && n > 0.86) {
-          addProp('matorral', gx, gy, (n * 53) | 0);
-        } else if (n > 0.975) {
-          addProp('roca', gx, gy, (n * 31) | 0);
+        if (forest > 0.60 && n > 0.50) addProp('pino', gx, gy, (n * 97) | 0);
+        else if (t === 'matorral' && n > 0.88) addProp('matorral', gx, gy, (n * 53) | 0);
+        else if (n > 0.982) addProp('roca', gx, gy, (n * 31) | 0);
+      }
+    }
+
+    // Olivares: hileras regulares, la marca del paisaje agrícola castellano.
+    [[86, 76], [104, 94]].forEach(function (origin) {
+      for (var row = 0; row < 10; row++) {
+        for (var col = 0; col < 12; col++) {
+          var ox = origin[0] + col * 2, oy = origin[1] + row * 2;
+          if (!inside(ox, oy)) continue;
+          var ot = typeAt(ox, oy);
+          if (ot === 'agua' || ot === 'tierra') continue;
+          addProp('olivo', ox, oy, (hash(ox, oy, 13) * 61) | 0);
+        }
+      }
+    });
+
+    /** Siembra un corro de props respetando el terreno. */
+    function scatter(spot, kind, density, seed) {
+      var rad = Math.ceil(spot.r);
+      for (var dy = -rad; dy <= rad; dy++) {
+        for (var dx = -rad; dx <= rad; dx++) {
+          if (Math.hypot(dx, dy) > spot.r) continue;
+          var px = spot.gx + dx, py = spot.gy + dy;
+          if (!inside(px, py)) continue;
+          var pt = typeAt(px, py);
+          if (pt === 'agua' || pt === 'tierra') continue;
+          if (hash(px, py, seed) < density) continue;
+          addProp(kind, px, py, (hash(px, py, seed + 2) * 41) | 0);
         }
       }
     }
 
-    // Olivar: hileras regulares, la marca del paisaje agrícola castellano.
-    for (var row = 0; row < 9; row++) {
-      for (var col = 0; col < 11; col++) {
-        var ox = 52 + col * 2, oy = 44 + row * 2;
-        if (!inside(ox, oy) || typeAt(ox, oy) === 'agua' || typeAt(ox, oy) === 'tierra') continue;
-        addProp('olivo', ox, oy, (hash(ox, oy, 13) * 61) | 0);
-      }
-    }
+    COPSES.forEach(function (c) { scatter(c, 'pino', 0.34, 821); });
+    ORCHARDS.forEach(function (o) { scatter(o, 'frutal', 0.42, 617); });
+    SCRAP_FIELDS.forEach(function (f) { scatter(f, 'chatarra', 0.55, 733); });
 
-    // Ribera: matorral disperso en las orillas arenosas.
     for (gy = 0; gy < H; gy++) {
       for (gx = 0; gx < W; gx++) {
         if (typeAt(gx, gy) !== 'arena') continue;
-        if (hash(gx, gy, 307) > 0.9) addProp('matorral', gx, gy, (hash(gx, gy, 311) * 43) | 0);
+        if (hash(gx, gy, 307) > 0.93) addProp('matorral', gx, gy, (hash(gx, gy, 311) * 43) | 0);
       }
     }
   }
 
-  /** Enseres de base: dan escala y hacen que la explanada no parezca vacía. */
   var BASE_PROPS = [
-    ['sacos', 53, 17], ['sacos', 57, 15], ['sacos', 58, 27], ['sacos', 49, 29],
-    ['cajas', 58, 21], ['cajas', 58, 22], ['cajas', 57, 26], ['cajas', 52, 20],
-    ['bidones', 59, 20], ['bidones', 52, 25], ['bidones', 61, 22],
-    ['cajas', 49, 20], ['bidones', 47, 25],
-
-    ['sacos', 21, 56], ['sacos', 24, 62], ['cajas', 17, 57],
-    ['bidones', 20, 65], ['cajas', 23, 64]
+    ['sacos', 89, 32], ['sacos', 95, 31], ['sacos', 95, 43], ['sacos', 86, 43],
+    ['cajas', 94, 37], ['cajas', 94, 38], ['cajas', 85, 38], ['cajas', 89, 43],
+    ['bidones', 95, 37], ['bidones', 84, 40], ['bidones', 97, 37],
+    ['sacos', 27, 92], ['cajas', 31, 100], ['bidones', 26, 101], ['cajas', 34, 96]
   ];
 
   function placeBaseProps() {
@@ -241,30 +336,125 @@ var OP = window.OP || (window.OP = {});
     });
   }
 
-  function raiseBuildings() {
-    BUILDINGS.forEach(function (b) {
-      var art = Art.buildings[b.id] && Art.buildings[b.id][b.fac];
-      if (!art) return;
-      for (var dy = 0; dy < b.h; dy++) {
-        for (var dx = 0; dx < b.w; dx++) {
-          if (inside(b.gx + dx, b.gy + dy)) blocked[idx(b.gx + dx, b.gy + dy)] = 1;
-        }
-      }
-      entities.push({
-        kind: 'building',
-        id: b.id, faction: b.fac,
-        gx: b.gx + b.w / 2, gy: b.gy + b.h / 2,
-        depth: b.gx + b.gy + b.w + b.h - 1,
-        sprite: art
-      });
+  /** Sprite que corresponde a un edificio, incluida la huerta según cosecha. */
+  function buildingSprite(id, faction, entity) {
+    if (id === 'huerta') {
+      var ratio = entity && entity.resource ? entity.resource.amount / entity.resource.max : 1;
+      var step = ratio > 0.66 ? 3 : (ratio > 0.33 ? 2 : 1);
+      return Art.farm[step];
+    }
+    return Art.buildings[id] && Art.buildings[id][faction];
+  }
+
+  function makeBuilding(defId, faction, gx, gy) {
+    var def = Eco.BUILDINGS[defId];
+    var e = {
+      kind: 'building', id: defId, def: def, faction: faction,
+      tileX: gx, tileY: gy, tilesW: def.w, tilesH: def.h,
+      gx: gx + def.w / 2, gy: gy + def.h / 2,
+      depth: def.flat ? gx + gy : gx + gy + def.w + def.h - 1,
+      sprite: null, queue: [],
+      resource: def.yields
+        ? { type: def.yields.type, amount: def.yields.amount, max: def.yields.amount }
+        : null
+    };
+    e.sprite = buildingSprite(defId, faction, e);
+    return e;
+  }
+
+  function raiseStartBuildings() {
+    START_BUILDINGS.forEach(function (b) {
+      var def = Eco.BUILDINGS[b.id];
+      if (!def) return;
+      occupy(b.gx, b.gy, def.w, def.h, 1);
+      pushEntity(makeBuilding(b.id, b.fac, b.gx, b.gy));
     });
   }
 
   /* ---------------------------------------------------------------------------
-   * 3. DIBUJADO DEL TERRENO
+   * 4. CONSTRUCCIÓN
    * ------------------------------------------------------------------------ */
 
-  /** Caja envolvente, en píxeles de mundo, del sector (cx, cy). */
+  /** ¿Cabe aquí una huella de w×h tiles? */
+  function canPlace(def, gx, gy) {
+    for (var dy = 0; dy < def.h; dy++) {
+      for (var dx = 0; dx < def.w; dx++) {
+        if (isBlocked(gx + dx, gy + dy)) return false;
+        if (typeAt(gx + dx, gy + dy) === 'agua') return false;
+      }
+    }
+    return true;
+  }
+
+  /** Abre una obra. Las casillas se ocupan desde el primer momento. */
+  function addSite(defId, faction, gx, gy) {
+    var def = Eco.BUILDINGS[defId];
+    if (!def || !canPlace(def, gx, gy)) return null;
+    occupy(gx, gy, def.w, def.h, 1);
+    var e = makeBuilding(defId, faction, gx, gy);
+    e.site = true;
+    e.progress = 0;
+    e.needed = def.buildTime;
+    return pushEntity(e);
+  }
+
+  /** Cierra la obra y la convierte en edificio terminado. */
+  function completeSite(site) {
+    site.site = false;
+    site.progress = site.needed;
+    site.sprite = buildingSprite(site.id, site.faction, site);
+    propsDirty = true;
+    return site;
+  }
+
+  /** Punto de descarga terminado más cercano. */
+  function findDropoff(gx, gy, faction) {
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < entities.length; i++) {
+      var e = entities[i];
+      if (e.kind !== 'building' || e.site || e.faction !== faction) continue;
+      if (!e.def || !e.def.dropoff) continue;
+      var d = (e.gx - gx) * (e.gx - gx) + (e.gy - gy) * (e.gy - gy);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  /** Nodo de recurso más cercano del tipo indicado, con reservas. */
+  function findNode(type, gx, gy, maxDist) {
+    var best = null, bestD = Infinity;
+    var limit = (maxDist || 40) * (maxDist || 40);
+    for (var i = 0; i < entities.length; i++) {
+      var e = entities[i];
+      if (!e.resource || e.resource.type !== type || e.resource.amount <= 0) continue;
+      if (e.site) continue;
+      var d = (e.gx - gx) * (e.gx - gx) + (e.gy - gy) * (e.gy - gy);
+      if (d < bestD && d <= limit) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  /** Entidad bajo una casilla: para seleccionar edificios y nodos con el ratón. */
+  function entityAt(gx, gy) {
+    var tx = Math.floor(gx), ty = Math.floor(gy);
+    for (var i = entities.length - 1; i >= 0; i--) {
+      var e = entities[i];
+      if (e.decor) continue;
+      if (tx >= e.tileX && tx < e.tileX + (e.tilesW || 1) &&
+          ty >= e.tileY && ty < e.tileY + (e.tilesH || 1)) return e;
+    }
+    return null;
+  }
+
+  /** Casilla libre más cercana al borde de un edificio, para soltar unidades. */
+  function freeTileNear(gx, gy, maxRadius) {
+    return nearestFree(gx, gy, maxRadius || 8);
+  }
+
+  /* ---------------------------------------------------------------------------
+   * 5. DIBUJADO DEL TERRENO
+   * ------------------------------------------------------------------------ */
+
   function chunkBox(cx, cy) {
     var x0 = cx * CHUNK, y0 = cy * CHUNK;
     var x1 = Math.min(x0 + CHUNK, W) - 1, y1 = Math.min(y0 + CHUNK, H) - 1;
@@ -277,7 +467,6 @@ var OP = window.OP || (window.OP = {});
     };
   }
 
-  /** Vecino por cada borde del rombo: 0 NE, 1 SE, 2 SO, 3 NO. */
   var EDGE_NEIGHBOUR = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 
   function bakeChunk(cx, cy) {
@@ -286,27 +475,25 @@ var OP = window.OP || (window.OP = {});
     c.width = Math.ceil(box.maxX - box.minX);
     c.height = Math.ceil(box.maxY - box.minY);
     var x = c.getContext('2d');
+    var gx, gy;
 
-    for (var gy = box.y0; gy <= box.y1; gy++) {
-      for (var gx = box.x0; gx <= box.x1; gx++) {
+    for (gy = box.y0; gy <= box.y1; gy++) {
+      for (gx = box.x0; gx <= box.x1; gx++) {
         var type = typeAt(gx, gy);
         var px = (gx - gy) * Iso.HW - Iso.HW - box.minX;
         var py = (gx + gy) * Iso.HH - box.minY;
         var set = Art.tiles[type];
         x.drawImage(set[variant[idx(gx, gy)] % set.length], px, py);
 
-        // Fleco del vecino de mayor prioridad, para fundir la frontera.
         var prio = Art.TERRAIN[type].prio;
         for (var e = 0; e < 4; e++) {
           var nx = gx + EDGE_NEIGHBOUR[e][0], ny = gy + EDGE_NEIGHBOUR[e][1];
           if (!inside(nx, ny)) continue;
           var nType = typeAt(nx, ny);
-          if (nType === type) continue;
-          if (Art.TERRAIN[nType].prio <= prio) continue;
+          if (nType === type || Art.TERRAIN[nType].prio <= prio) continue;
           x.drawImage(Art.fringes[nType][e], px, py);
         }
 
-        // Orilla: bajío y espuma en el lado del agua que da a tierra.
         if (type === 'agua') {
           for (var se = 0; se < 4; se++) {
             var sx2 = gx + EDGE_NEIGHBOUR[se][0], sy2 = gy + EDGE_NEIGHBOUR[se][1];
@@ -317,18 +504,16 @@ var OP = window.OP || (window.OP = {});
       }
     }
 
-    // Mata suelta: se dibuja después de todos los tiles y con desplazamiento
-    // libre, así que cruza los bordes de los rombos y deshace la cuadrícula.
+    // Mata suelta: cruza los bordes de los rombos y deshace la cuadrícula.
     // Se omite el anillo exterior del sector para que nada quede cortado.
-    for (var ty = box.y0 + 1; ty < box.y1; ty++) {
-      for (var tx = box.x0 + 1; tx < box.x1; tx++) {
-        var t = typeAt(tx, ty);
-        var def = Art.TERRAIN[t];
+    for (gy = box.y0 + 1; gy < box.y1; gy++) {
+      for (gx = box.x0 + 1; gx < box.x1; gx++) {
+        var def = Art.TERRAIN[typeAt(gx, gy)];
         if (!def.fleck.length) continue;
-        var cxp = (tx - ty) * Iso.HW - box.minX;
-        var cyp = (tx + ty) * Iso.HH + Iso.HH - box.minY;
+        var cxp = (gx - gy) * Iso.HW - box.minX;
+        var cyp = (gx + gy) * Iso.HH + Iso.HH - box.minY;
         for (var k = 0; k < 3; k++) {
-          var h1 = hash(tx, ty, 900 + k), h2 = hash(tx, ty, 950 + k), h3 = hash(tx, ty, 980 + k);
+          var h1 = hash(gx, gy, 900 + k), h2 = hash(gx, gy, 950 + k), h3 = hash(gx, gy, 980 + k);
           x.globalAlpha = 0.3 + h3 * 0.4;
           x.fillStyle = def.fleck[(h3 * def.fleck.length) | 0];
           x.beginPath();
@@ -354,13 +539,29 @@ var OP = window.OP || (window.OP = {});
       }
     }
 
-    return { canvas: c, box: box };
+    return { canvas: c, box: box, used: 0 };
   }
 
+  /**
+   * Sector horneado, con caché acotada: al superar el límite se desaloja el
+   * menos usado recientemente. Rehornear cuesta pocos milisegundos.
+   */
   function chunkAt(cx, cy) {
     var key = cy * CHUNKS_X + cx;
-    if (!chunkCache[key]) chunkCache[key] = bakeChunk(cx, cy);
-    return chunkCache[key];
+    var ch = chunkCache.get(key);
+    if (!ch) {
+      if (chunkCache.size >= CHUNK_LIMIT) {
+        var oldestKey = null, oldest = Infinity;
+        chunkCache.forEach(function (v, k) {
+          if (v.used < oldest) { oldest = v.used; oldestKey = k; }
+        });
+        if (oldestKey !== null) chunkCache.delete(oldestKey);
+      }
+      ch = bakeChunk(cx, cy);
+      chunkCache.set(key, ch);
+    }
+    ch.used = ++chunkClock;
+    return ch;
   }
 
   function drawTerrain(ctx, camera) {
@@ -371,32 +572,42 @@ var OP = window.OP || (window.OP = {});
         if (box.maxX < v.minX || box.minX > v.maxX ||
             box.maxY < v.minY || box.minY > v.maxY) continue;
         var ch = chunkAt(cx, cy);
-        ctx.drawImage(ch.canvas, ch.box.minX, ch.box.minY);
+        var sx = Math.max(0, Math.floor(v.minX - box.minX));
+        var sy = Math.max(0, Math.floor(v.minY - box.minY));
+        var sw = Math.min(ch.canvas.width - sx, Math.ceil(v.maxX - box.minX) - sx);
+        var sh = Math.min(ch.canvas.height - sy, Math.ceil(v.maxY - box.minY) - sy);
+        if (sw <= 0 || sh <= 0) continue;
+        ctx.drawImage(ch.canvas, sx, sy, sw, sh, box.minX + sx, box.minY + sy, sw, sh);
       }
     }
   }
 
-  /** Brillos animados sobre el agua; se dibujan sueltos para que se muevan. */
-  function drawWaterSparkle(ctx, camera, time) {
+  function visibleTileRange(camera, pad) {
     var v = camera.visibleWorldBounds(Iso.TILE_W);
-    var g0 = Iso.toGrid(v.minX, v.minY), g1 = Iso.toGrid(v.maxX, v.maxY);
-    // El rectángulo visible en píxeles se convierte en un rombo en la rejilla,
-    // así que hay que abarcar las cuatro esquinas, no sólo dos.
-    var cs = [g0, Iso.toGrid(v.maxX, v.minY), g1, Iso.toGrid(v.minX, v.maxY)];
+    var cs = [
+      Iso.toGrid(v.minX, v.minY), Iso.toGrid(v.maxX, v.minY),
+      Iso.toGrid(v.maxX, v.maxY), Iso.toGrid(v.minX, v.maxY)
+    ];
     var xs = cs.map(function (g) { return g.gx; }), ys = cs.map(function (g) { return g.gy; });
-    var gxMin = Math.max(0, Math.floor(Math.min.apply(null, xs)) - 2);
-    var gxMax = Math.min(W - 1, Math.ceil(Math.max.apply(null, xs)) + 2);
-    var gyMin = Math.max(0, Math.floor(Math.min.apply(null, ys)) - 2);
-    var gyMax = Math.min(H - 1, Math.ceil(Math.max.apply(null, ys)) + 2);
+    var p = pad || 2;
+    return {
+      x0: Math.max(0, Math.floor(Math.min.apply(null, xs)) - p),
+      x1: Math.min(W - 1, Math.ceil(Math.max.apply(null, xs)) + p),
+      y0: Math.max(0, Math.floor(Math.min.apply(null, ys)) - p),
+      y1: Math.min(H - 1, Math.ceil(Math.max.apply(null, ys)) + p)
+    };
+  }
 
+  function drawWaterSparkle(ctx, camera, time) {
+    if (camera.zoom < 0.8) return;
+    var r = visibleTileRange(camera, 2);
     ctx.fillStyle = '#cfeaf4';
-    for (var gy = gyMin; gy <= gyMax; gy++) {
-      for (var gx = gxMin; gx <= gxMax; gx++) {
+    for (var gy = r.y0; gy <= r.y1; gy++) {
+      for (var gx = r.x0; gx <= r.x1; gx++) {
         if (typeAt(gx, gy) !== 'agua') continue;
         var seed = hash(gx, gy, 401);
-        var a = 0.10 + 0.16 * Math.max(0, Math.sin(time * 1.5 + seed * 12.5));
+        ctx.globalAlpha = 0.10 + 0.16 * Math.max(0, Math.sin(time * 1.5 + seed * 12.5));
         var p = Iso.toScreen(gx + 0.5, gy + 0.5);
-        ctx.globalAlpha = a;
         ctx.beginPath();
         ctx.ellipse(p.x + (seed - 0.5) * 24, p.y + (hash(gx, gy, 409) - 0.5) * 12,
                     4.5, 1.5, 0, 0, Math.PI * 2);
@@ -406,14 +617,13 @@ var OP = window.OP || (window.OP = {});
     ctx.globalAlpha = 1;
   }
 
-  /** Entidades estáticas visibles, volcadas en `out` sin ordenar. */
   function collectStatics(camera, out) {
-    var v = camera.visibleWorldBounds(160);
+    var v = camera.visibleWorldBounds(200);
     for (var i = 0; i < entities.length; i++) {
       var e = entities[i];
       var p = Iso.toScreen(e.gx, e.gy);
-      if (p.x < v.minX - 120 || p.x > v.maxX + 120 ||
-          p.y < v.minY - 220 || p.y > v.maxY + 120) continue;
+      if (p.x < v.minX - 160 || p.x > v.maxX + 160 ||
+          p.y < v.minY - 260 || p.y > v.maxY + 160) continue;
       e.sx = p.x; e.sy = p.y;
       out.push(e);
     }
@@ -421,12 +631,35 @@ var OP = window.OP || (window.OP = {});
   }
 
   function drawEntity(ctx, e) {
-    var s = e.sprite;
-    ctx.drawImage(s.img, e.sx - s.ax, e.sy - s.ay);
+    if (e.site) {
+      var scaffold = Art.scaffolds[e.def.w + 'x' + e.def.h];
+      if (scaffold) ctx.drawImage(scaffold.img, e.sx - scaffold.ax, e.sy - scaffold.ay);
+
+      var s = e.sprite;
+      var ratio = e.needed ? Math.min(1, e.progress / e.needed) : 0;
+      if (s && ratio > 0.02) {
+        // El edificio se revela de abajo arriba conforme avanza la obra.
+        var visible = Math.max(2, s.img.height * ratio);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(e.sx - s.ax, e.sy - s.ay + (s.img.height - visible), s.img.width, visible);
+        ctx.clip();
+        ctx.globalAlpha = 0.6 + 0.4 * ratio;
+        ctx.drawImage(s.img, e.sx - s.ax, e.sy - s.ay);
+        ctx.restore();
+      }
+      return;
+    }
+
+    // La huerta cambia de sprite según lo que quede por cosechar.
+    if (e.id === 'huerta') e.sprite = buildingSprite('huerta', e.faction, e);
+
+    var sp = e.sprite;
+    if (sp) ctx.drawImage(sp.img, e.sx - sp.ax, e.sy - sp.ay);
   }
 
   /* ---------------------------------------------------------------------------
-   * 4. NAVEGACIÓN
+   * 6. NAVEGACIÓN
    * ------------------------------------------------------------------------ */
 
   var N = W * H;
@@ -475,10 +708,9 @@ var OP = window.OP || (window.OP = {});
 
   var NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
-  /** Tile libre más cercano, por anillos concéntricos. */
   function nearestFree(gx, gy, maxRadius) {
-    gx = Math.max(0, Math.min(W - 1, Math.round(gx)));
-    gy = Math.max(0, Math.min(H - 1, Math.round(gy)));
+    gx = Math.max(0, Math.min(W - 1, Math.floor(gx)));
+    gy = Math.max(0, Math.min(H - 1, Math.floor(gy)));
     if (!isBlocked(gx, gy)) return { gx: gx, gy: gy };
     var limit = maxRadius || 14;
     for (var r = 1; r <= limit; r++) {
@@ -522,14 +754,10 @@ var OP = window.OP || (window.OP = {});
     return out;
   }
 
-  /**
-   * Ruta terrestre entre dos posiciones continuas de la rejilla.
-   * @returns {{points: Array<{gx,gy}>, relocated: boolean}|null}
-   */
   function findPath(fromX, fromY, toX, toY) {
     var start = nearestFree(fromX, fromY, 6);
     if (!start) return null;
-    var goalRaw = { gx: Math.round(toX), gy: Math.round(toY) };
+    var goalRaw = { gx: Math.floor(toX), gy: Math.floor(toY) };
     var goal = nearestFree(goalRaw.gx, goalRaw.gy, 14);
     if (!goal) return null;
     var relocated = goal.gx !== goalRaw.gx || goal.gy !== goalRaw.gy;
@@ -584,49 +812,93 @@ var OP = window.OP || (window.OP = {});
     }
     cells.reverse();
 
-    var points = [{ gx: fromX, gy: fromY }].concat(cells);
-    var path = smooth(points);
+    var path = smooth([{ gx: fromX, gy: fromY }].concat(cells));
     path.shift();
     return { points: path, relocated: relocated };
   }
 
+  /**
+   * Ruta hasta el borde de un objetivo ocupado (nodo, obra o edificio): se
+   * busca la casilla libre más próxima al objetivo desde el lado del origen.
+   */
+  function pathToTarget(fromX, fromY, target) {
+    var w = target.tilesW || 1, h = target.tilesH || 1;
+    var best = null, bestD = Infinity;
+    for (var dy = -1; dy <= h; dy++) {
+      for (var dx = -1; dx <= w; dx++) {
+        var inFootprint = dx >= 0 && dx < w && dy >= 0 && dy < h;
+        if (inFootprint) continue;
+        var tx = target.tileX + dx, ty = target.tileY + dy;
+        if (isBlocked(tx, ty)) continue;
+        var d = (tx + 0.5 - fromX) * (tx + 0.5 - fromX) + (ty + 0.5 - fromY) * (ty + 0.5 - fromY);
+        if (d < bestD) { bestD = d; best = { gx: tx + 0.5, gy: ty + 0.5 }; }
+      }
+    }
+    if (!best) return null;
+    return findPath(fromX, fromY, best.gx, best.gy);
+  }
+
   /* ---------------------------------------------------------------------------
-   * 5. MINIMAPA
+   * 7. MINIMAPA
    * ------------------------------------------------------------------------ */
 
-  var MINI_SCALE = 2.2;
+  var MINI_SCALE = 1.6;
   var minimap = null;
 
   function buildMinimap() {
     var w = Math.ceil((W + H) * MINI_SCALE), h = Math.ceil((W + H) * MINI_SCALE / 2);
-    var c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    var x = c.getContext('2d');
+    var terrainLayer = document.createElement('canvas');
+    terrainLayer.width = w; terrainLayer.height = h;
+    var x = terrainLayer.getContext('2d');
     var ox = H * MINI_SCALE;
 
     for (var gy = 0; gy < H; gy++) {
       for (var gx = 0; gx < W; gx++) {
         x.fillStyle = Art.TERRAIN[typeAt(gx, gy)].base;
-        var px = (gx - gy) * MINI_SCALE + ox;
-        var py = (gx + gy) * MINI_SCALE / 2;
-        x.fillRect(px - MINI_SCALE, py, MINI_SCALE * 2, MINI_SCALE + 0.5);
+        x.fillRect((gx - gy) * MINI_SCALE + ox - MINI_SCALE,
+                   (gx + gy) * MINI_SCALE / 2, MINI_SCALE * 2, MINI_SCALE + 0.5);
       }
     }
-    // Arbolado y construcciones sobre la base del terreno.
-    entities.forEach(function (e) {
-      x.fillStyle = e.kind === 'building'
-        ? Art.FACTION_COLORS[e.faction].team
-        : 'rgba(40, 62, 30, 0.75)';
-      var px = (e.gx - e.gy) * MINI_SCALE + ox;
-      var py = (e.gx + e.gy) * MINI_SCALE / 2;
-      var r = e.kind === 'building' ? 3 : 1.6;
-      x.fillRect(px - r, py - r / 2, r * 2, r);
-    });
-    minimap = { canvas: c, scale: MINI_SCALE, ox: ox };
+
+    var propsLayer = document.createElement('canvas');
+    propsLayer.width = w; propsLayer.height = h;
+
+    minimap = { terrain: terrainLayer, props: propsLayer, width: w, height: h,
+                scale: MINI_SCALE, ox: ox };
+    redrawMinimapProps();
     return minimap;
   }
 
-  /** Píxel del minimapa → rejilla. */
+  var MINI_COLOR = {
+    madera: 'rgba(46, 74, 34, 0.85)',
+    viveres: 'rgba(150, 176, 84, 0.9)',
+    metal: 'rgba(168, 172, 178, 0.9)'
+  };
+
+  /** Capa de entidades del minimapa; se rehace sólo cuando algo cambia. */
+  function redrawMinimapProps() {
+    if (!minimap) return;
+    var x = minimap.props.getContext('2d');
+    x.clearRect(0, 0, minimap.width, minimap.height);
+    for (var i = 0; i < entities.length; i++) {
+      var e = entities[i];
+      var px = (e.gx - e.gy) * MINI_SCALE + minimap.ox;
+      var py = (e.gx + e.gy) * MINI_SCALE / 2;
+      if (e.kind === 'building') {
+        x.fillStyle = e.site ? 'rgba(230, 210, 130, 0.9)' : Art.FACTION_COLORS[e.faction].team;
+        x.fillRect(px - 2.5, py - 1.5, 5, 3);
+      } else if (e.resource) {
+        x.fillStyle = MINI_COLOR[e.resource.type];
+        x.fillRect(px - 1, py - 0.5, 2, 1.5);
+      }
+    }
+    propsDirty = false;
+  }
+
+  function syncMinimap() {
+    if (propsDirty) redrawMinimapProps();
+  }
+
   function minimapToGrid(px, py) {
     var rx = (px - minimap.ox) / MINI_SCALE;
     var ry = py / (MINI_SCALE / 2);
@@ -634,13 +906,13 @@ var OP = window.OP || (window.OP = {});
   }
 
   /* ---------------------------------------------------------------------------
-   * 6. API
+   * 8. API
    * ------------------------------------------------------------------------ */
 
   function build() {
     generateTerrain();
     plantVegetation();
-    raiseBuildings();
+    raiseStartBuildings();
     placeBaseProps();
     buildMinimap();
 
@@ -649,10 +921,10 @@ var OP = window.OP || (window.OP = {});
       Iso.toScreen(W, H), Iso.toScreen(0, H)
     ];
     world.bounds = {
-      minX: Math.min.apply(null, corners.map(function (p) { return p.x; })) - 120,
-      maxX: Math.max.apply(null, corners.map(function (p) { return p.x; })) + 120,
-      minY: Math.min.apply(null, corners.map(function (p) { return p.y; })) - 220,
-      maxY: Math.max.apply(null, corners.map(function (p) { return p.y; })) + 160
+      minX: Math.min.apply(null, corners.map(function (p) { return p.x; })) - 140,
+      maxX: Math.max.apply(null, corners.map(function (p) { return p.x; })) + 140,
+      minY: Math.min.apply(null, corners.map(function (p) { return p.y; })) - 240,
+      maxY: Math.max.apply(null, corners.map(function (p) { return p.y; })) + 180
     };
     return world;
   }
@@ -661,23 +933,36 @@ var OP = window.OP || (window.OP = {});
     W: W, H: H,
     bounds: null,
     entities: entities,
+    baseMet: BASE_MET,
     build: build,
     typeAt: typeAt,
     isBlocked: isBlocked,
     inside: inside,
     nearestFree: nearestFree,
+    freeTileNear: freeTileNear,
     findPath: findPath,
+    pathToTarget: pathToTarget,
     drawTerrain: drawTerrain,
     drawWaterSparkle: drawWaterSparkle,
     collectStatics: collectStatics,
     drawEntity: drawEntity,
     minimap: function () { return minimap; },
+    syncMinimap: syncMinimap,
     minimapToGrid: minimapToGrid,
-    buildings: BUILDINGS,
+    markDirty: function () { propsDirty = true; },
+    canPlace: canPlace,
+    addSite: addSite,
+    completeSite: completeSite,
+    removeEntity: removeEntity,
+    leaveStump: leaveStump,
+    findDropoff: findDropoff,
+    findNode: findNode,
+    entityAt: entityAt,
     stats: function () {
-      var free = 0;
+      var free = 0, nodes = 0;
       for (var i = 0; i < N; i++) if (!blocked[i]) free++;
-      return { tiles: N, transitables: free, entidades: entities.length };
+      for (var j = 0; j < entities.length; j++) if (entities[j].resource) nodes++;
+      return { tiles: N, transitables: free, entidades: entities.length, nodos: nodes };
     }
   };
 
