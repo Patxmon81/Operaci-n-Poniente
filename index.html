@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="description" content="Operación Poniente — juego de estrategia en tiempo real ambientado en España, 2026. Fase 1: motor base.">
+<meta name="color-scheme" content="dark">
+<title>Operación Poniente</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+
+    <header id="hud-top">
+      <div class="brand">
+        <h1>Operación Poniente</h1>
+        <p>Mando de Emergencia Territorial &middot; España, 2026</p>
+      </div>
+      <div class="phase">
+        <span class="tag">Fase 1</span>
+        <span class="sub">Motor base</span>
+      </div>
+    </header>
+
+    <section id="readouts" class="panel">
+      <div class="row"><span class="k">Coordenadas</span><span class="v" id="readout-cursor">&mdash;</span></div>
+      <div class="row"><span class="k">Terreno</span><span class="v" id="readout-terrain">&mdash;</span></div>
+      <div class="row"><span class="k">Zoom</span><span class="v" id="readout-zoom">&mdash;</span></div>
+      <div class="row"><span class="k">Malla</span><span class="v" id="readout-nav">&mdash;</span></div>
+      <div class="row"><span class="k">Render</span><span class="v" id="readout-fps">&mdash;</span></div>
+    </section>
+
+    <section id="panel-selection" class="panel">
+      <h2>Fuerzas propias <span id="selection-count">0 / 0</span></h2>
+      <ul id="selection-list">
+        <li class="empty">Sin unidades seleccionadas</li>
+      </ul>
+    </section>
+
+    <aside id="panel-side">
+
+      <section id="panel-legend" class="panel">
+        <h2>Leyenda</h2>
+        <ul class="legend">
+          <li><i class="glyph hq"></i>Cuartel General (Madrid)</li>
+          <li><i class="glyph city"></i>Nodo urbano</li>
+          <li><i class="glyph plaza"></i>Plaza de soberanía</li>
+          <li><i class="glyph hostile"></i>Enclave del Consorcio Poniente</li>
+        </ul>
+      </section>
+
+      <section id="panel-controls" class="panel">
+        <h2>Controles</h2>
+        <dl class="controls">
+          <dt>Clic izq.</dt><dd>Seleccionar unidad</dd>
+          <dt>Arrastrar izq.</dt><dd>Caja de selección</dd>
+          <dt>Mayús + clic</dt><dd>Añadir a la selección</dd>
+          <dt>Clic der.</dt><dd>Ordenar movimiento</dd>
+          <dt>Botón central</dt><dd>Desplazar mapa</dd>
+          <dt>Espacio + arrastrar</dt><dd>Desplazar mapa</dd>
+          <dt>Rueda</dt><dd>Zoom sobre el cursor</dd>
+          <dt>W A S D / flechas</dt><dd>Desplazar mapa</dd>
+          <dt>Q / E</dt><dd>Alejar / acercar</dd>
+          <dt>X</dt><dd>Alto</dd>
+          <dt>Esc</dt><dd>Anular selección</dd>
+          <dt>Ctrl + A</dt><dd>Seleccionar todo</dd>
+          <dt>1 &middot; 2 &middot; 3</dt><dd>Seleccionar unidad</dd>
+          <dt>G</dt><dd>Malla de navegación</dd>
+          <dt>F</dt><dd>Centrar en el CG</dd>
+          <dt>H</dt><dd>Ocultar interfaz</dd>
+        </dl>
+      </section>
+
+    </aside>
+
+    <div id="toast"></div>
+
+  </div>
+
+  <noscript>
+    <div class="noscript">Operación Poniente necesita JavaScript activado para ejecutar el motor del mapa.</div>
+  </noscript>
+
+  <script src="js/map.js"></script>
+  <script src="js/units.js"></script>
+  <script src="js/main.js"></script>
+
+</body>
+</html>
