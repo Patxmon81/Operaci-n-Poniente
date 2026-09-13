@@ -20,6 +20,8 @@
   --warn:           #ffc660;
   --error:          #ff6050;
 
+  color-scheme: dark;
+
   --ui: "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
   --mono: "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
 }
